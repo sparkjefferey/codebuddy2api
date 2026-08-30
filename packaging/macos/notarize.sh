@@ -56,8 +56,23 @@ else
 fi
 
 # ---- 3) 出 .dmg ----
+# "Resource busy" 是 macOS CI runner 上新装 .app 被 Spotlight/mds 即时索引的已知瞬态，重试即可。
 echo "::group::Create .dmg"
-hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$OUT"
+dmg_ok=0
+for i in 1 2 3; do
+  if hdiutil create -volname "$VOL" -srcfolder "$APP" -ov -format UDZO "$OUT" 2>dmg_err.txt; then
+    dmg_ok=1
+    break
+  fi
+  echo "⚠️  hdiutil 第 $i 次失败($(tr -d '\r' < dmg_err.txt | tail -1))，重试…"
+  sleep 5
+done
+if [[ "$dmg_ok" != "1" || ! -f "$OUT" ]]; then
+  echo "❌ 三次 hdiutil 仍失败，放弃。"
+  cat dmg_err.txt; rm -f dmg_err.txt
+  exit 1
+fi
+rm -f dmg_err.txt
 echo "::endgroup::"
 
 # ---- 4) 公证(.dmg) + stapl e ----
