@@ -1,0 +1,31 @@
+# 参考 / 原始文件（原版 sliverkiss 与本项目旧快照），不发布
+references/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 本地运行产物 / 日志 / IDE
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+
+# 个人 / 敏感信息（绝不提交）
+*.token
+*.key
+secrets.*
+config.json
+
+# 测试（暂不公开）
+test_*.py

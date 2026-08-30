@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkBuddy 算力网关 · 控制台</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#1a1d21; --mut:#6b7280; --line:#e5e7eb;
+    --acc:#2f6feb; --free:#0f9d58; --warn:#d97706; --err:#dc2626;
+    --chip:#eef2ff; --tab:#f0f2f5; --exp:#f9fafb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0e1116; --panel:#161b22; --ink:#e6e8eb; --mut:#8b949e; --line:#21262d;
+      --acc:#3b82f6; --free:#34d399; --warn:#fbbf24; --err:#f87171; --chip:#1c2a41;
+      --tab:#151b23; --exp:#10151c;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);height:100vh;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--mut);display:inline-block}
+  .dot.ok{background:var(--free)} .dot.bad{background:var(--err)}
+  .sp{flex:1}
+  button,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{background:var(--tab)}
+  button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .tabs{display:flex;gap:2px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;padding:10px 16px;background:transparent;color:var(--mut);font-weight:500}
+  .tabs button.on{color:var(--ink);border-bottom-color:var(--acc)}
+  main{flex:1;overflow-y:auto;padding:16px;display:none}
+  main.on{display:block}
+  h2{font-size:14px;margin:0 0 4px}
+  .sub{color:var(--mut);font-size:12px;margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card.o-l{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .card h3{margin:0;font-size:14px}
+  .tag{font-size:11px;padding:1px 8px;border-radius:10px;background:var(--chip);color:var(--mut)}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap}
+  .row label{color:var(--mut);font-size:12px;min-width:44px}
+  select,input[type=text],input[type=number],textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--exp);color:var(--ink);font-size:13px}
+  .grow select{width:auto;min-width:130px}
+  textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;min-height:84px;resize:vertical}
+  .free{color:var(--free);font-weight:600}
+  .muted{color:var(--mut);font-size:12px}
+  .badge{font-size:11px;padding:1px 6px;border-radius:10px;background:var(--chip)}
+  .test{font-size:12px;padding:8px 10px;border-radius:8px;margin-top:8px;white-space:pre-wrap;word-break:break-word;border:1px dashed var(--line);display:none}
+  .test.show{display:block}
+  .test.ok{border-color:var(--free);color:var(--free)}
+  .test.err{border-color:var(--err);color:var(--err)}
+  .credits{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;flex-wrap:wrap}
+  .credits b{font-size:15px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--mut);font-weight:500;font-size:12px}
+  .filters{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+  .filters input[type=text]{width:220px}
+  .onoff{position:relative;width:36px;height:20px;display:inline-block;flex-shrink:0}
+  .onoff input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:var(--line);border-radius:10px;transition:.15s;cursor:pointer}
+  .slider:before{content:"";position:absolute;width:14px;height:14px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}
+  .onoff input:checked+.slider{background:var(--free)}
+  .onoff input:checked+.slider:before{transform:translateX(16px)}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal.open{display:flex}
+  .modal .card{background:var(--panel);border-radius:12px;padding:18px;width:400px;max-width:92vw}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:13px;display:none;z-index:60;max-width:90vw}
+  .toast.show{display:block}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>WorkBuddy 算力网关 · 控制台</h1>
+  <span class="muted" id="cfgfile"></span>
+  <div class="sp"></div>
+  <button onclick="refreshAll()">🔄 刷新</button>
+  <button onclick="openSettings()">⚙ 网关设置</button>
+</header>
+
+<div class="tabs">
+  <button id="t-agent" class="on" onclick="switchTab('agent')">① Agent 连接</button>
+  <button id="t-compute" onclick="switchTab('compute')">② WorkBuddy 算力 / 模型</button>
+  <button id="t-test" onclick="switchTab('test')">③ 模型快速测试</button>
+</div>
+
+<!-- ══════════════ Tab1: Agent 连接管理 ══════════════ -->
+<main id="p-agent" class="on">
+  <h2>要连接的 Agent</h2>
+  <p class="sub">为每个下游 agent 选择「账号 + 模型」,改动自动保存到 config.json;配置片段可直接复制到你的客户端。</p>
+  <div class="grid" id="agent-cards"></div>
+</main>
+
+<!-- ══════════════ Tab2: 算力 / 模型管理 ══════════════ -->
+<main id="p-compute">
+  <h2>WorkBuddy 账号(算力提供方)</h2>
+  <div id="credit-cards"></div>
+
+  <h2 style="margin-top:18px">路由默认</h2>
+  <div class="card">
+    <div class="row grow">
+      <label>默认账号</label>
+      <select id="set-default-account"></select>
+      <span class="muted">请求未指定账号/模型专属时不存在的兜底账号</span>
+    </div>
+    <div class="row">
+      <label>模型同步(小时)</label>
+      <input type="number" id="set-sync-h" min="1" max="168" value="24" style="width:90px">
+      <button class="primary" onclick="saveRoutingSettings()">保存路由设置</button>
+    </div>
+  </div>
+
+  <h2 style="margin-top:18px">模型清单 / 定价(来自后端元数据)</h2>
+  <div class="filters">
+    <input type="text" id="mfilter" placeholder="搜索模型…" oninput="renderModelTable()">
+    <select id="mfree" onchange="renderModelTable()">
+      <option value="">全部</option><option value="free">仅免费</option><option value="paid">仅计费</option>
+    </select>
+    <span class="muted" id="mcount"></span>
+  </div>
+  <div class="card" style="overflow-x:auto"><table id="model-table"></table></div>
+</main>
+
+<!-- ══════════════ Tab3: 模型快速测试 ══════════════ -->
+<main id="p-test">
+  <h2>模型快速测试</h2>
+  <p class="sub">选一个账号 + 模型,发一个极小请求验证真实可用(可看到实际消耗积分)。</p>
+  <div class="card" style="max-width:640px">
+    <div class="row grow">
+      <label>账号</label>
+      <select id="qt-account" onchange="fillQTestModels()"></select>
+      <label style="margin-left:10px">模型</label>
+      <select id="qt-model" style="min-width:200px"></select>
+    </div>
+    <label class="muted">提示词(越小越好)</label>
+    <textarea id="qt-prompt" rows="2">你好,请只回复两个字:OK</textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:6px">
+      <button class="primary" onclick="quickTest()" id="qt-btn">运行测试</button>
+    </div>
+    <div class="test" id="qt-result"></div>
+  </div>
+</main>
+
+<div class="modal" id="settings">
+  <div class="card">
+    <h3 style="margin:0 0 12px">网关设置</h3>
+    <label class="muted">网关地址(留空 = 当前)</label>
+    <input type="text" id="set_base" placeholder="http://127.0.0.1:8787">
+    <label class="muted">API Key(网关启用鉴权时填写)</label>
+    <input type="text" id="set_key" placeholder="留空不发送">
+    <div class="row" style="justify-content:flex-end;margin-top:8px">
+      <button onclick="closeSettings()">取消</button>
+      <button class="primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const LS_BASE="wb_base_url", LS_KEY="wb_api_key";
+let BASE="", API_KEY="";
+let MODELS=[], ACCOUNTS=[], AGENTS={}, EP=null, SETTINGS={};
+let saveTimer=null, tabNow="agent";
+const $=id=>document.getElementById(id);
+
+function toast(msg,ms=2200){const t=$("toast");t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),ms);}
+function base(p){return BASE+p;}
+function fmt(n){if(n==null)return "";if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1000)return Math.round(n/1000)+"k";return n;}
+
+/* ---------- 网关逻辑 ---------- */
+async function jfetch(path,opts={}){
+  const h=Object.assign({"Content-Type":"application/json"},opts.headers||{});
+  if(API_KEY)h.Authorization="Bearer "+API_KEY;
+  const r=await fetch(base(path),Object.assign({},opts,{headers:h}));
+  if(!r.ok){let t="";try{const j=await r.json();t=(j.error&&(j.error.message||j.error))||j.detail||j.msg||JSON.stringify(j);}catch(e){t=(await r.text().catch(()=>""))||"";}
+    throw new Error(r.status+(t?" : "+String(t).slice(0,160):""));}
+  return r;
+}
+async function jjson(path,opts={}){return (await jfetch(path,opts)).json();}
+
+/* ---------- 加载 ---------- */
+async function refreshAll(){
+  const dot=$("dot");
+  const h=await jjson("/health").catch(()=>null);
+  if(!h){dot.className="dot bad";toast("网关不可达");return;}
+  dot.className="dot "+(h.status==="ok"?"ok":"bad");
+  ACCOUNTS=h.accounts||[];
+  $("cfgfile").textContent=h.config&&h.config.log_file?("log: "+h.config.log_file):"";
+  const a=await jjson("/agents").catch(()=>null);
+  if(a){AGENTS=a.agents||{};EP=a.endpoints||null;if(a.config_file)$("cfgfile").textContent="config: "+a.config_file.split("/").pop();}
+  SETTINGS=await jjson("/settings").catch(()=>({}));
+  await Promise.all([refreshModels(),refreshCredits()]);
+  renderAgents();renderSettingsPanel();fillQTestAccounts();
+}
+async function refreshModels(){
+  try{const d=await jjson("/v1/models");MODELS=(d.data||[]).map(m=>({id:m.id,account:m.x_account||"",free:!!m.x_free,credits:(m.x_credits!=null?m.x_credits:null),badges:m.badges||[],ctx:m.context_window}));}catch(e){MODELS=[];}
+  renderModelTable();fillQTestModels();
+}
+async function refreshCredits(){
+  try{
+    const d=await jjson("/credits");
+    $("credit-cards").innerHTML=(d.accounts||[]).map(a=>{
+      const ok=a.error?"":`<b class="${a.credits_remaining>0?"free":""}">${a.credits_remaining}</b>`;
+      return `<div class="credits">
+        <span class="tag">${a.region||a.name}</span>
+        <span><b>${a.name}</b> <span class="muted">${a.backend||""}</span></span>
+        剩余 ${ok||'<span class="muted">'+a.error+'</span>'}
+        <span class="sp"></span>
+        <button onclick="checkin('${a.name}')">🎫 签到</button>
+      </div>`;
+    }).join("")||'<div class="muted">无账号</div>';
+  }catch(e){$("credit-cards").innerHTML='<div class="muted">积分接口不可用</div>';}
+}
+
+/* ---------- 切换 Tab ---------- */
+function switchTab(name){
+  tabNow=name;
+  for(const t of ["agent","compute","test"])
+    $("t-"+t).classList.toggle("on",t===name),
+    $("p-"+t).classList.toggle("on",t===name);
+  if(name==="compute"){refreshModels();refreshCredits();}
+  if(name==="test"){fillQTestAccounts();}
+}
+
+/* ---------- ① Agent 连接管理 ---------- */
+const PROTO_LABEL={anthropic:"Anthropic · /v1/messages",responses:"OpenAI Responses · /v1/responses",chat:"OpenAI Chat · /v1/chat/completions"};
+function effId(agent){
+  let id=(agent.model||"auto").trim();
+  if(agent.account==="global"&&!id.startsWith("global/"))return "global/"+id;
+  const parts=id.split("/");return parts[parts.length-1];
+}
+function modelsForAccount(account){
+  if(account==="global")return MODELS.filter(m=>m.account==="global").map(m=>({...m,plain:m.id.replace(/^global\//,"")}));
+  if(account==="cn")return MODELS.filter(m=>m.account==="cn");
+  return MODELS.filter(m=>m.account!=="global"); // 默认:cn 裸模型 + global 别名
+}
+function accountRegions(){return [...new Set(ACCOUNTS.map(a=>a.region).filter(Boolean))];}
+function renderAgents(){
+  const box=$("agent-cards");box.innerHTML="";
+  const keys=Object.keys(AGENTS);
+  if(!keys.length){box.innerHTML='<div class="muted">未加载到 agent 配置(网关不可达或未登录)。</div>';return;}
+  for(const id of keys){
+    const a=AGENTS[id];
+    const card=document.createElement("div");card.className="card";
+    const accOpts=accountRegions();
+    const modelOpts=modelsForAccount(a.account||"");
+    const anthropicBtn = a.protocol==="anthropic"
+      ? `<button onclick="ccSwitchReg('${id}')">⚡ 注册 CC Switch</button>`
+      : "";
+    card.innerHTML=`
+      <div class="o-l">
+        <h3>${esc(a.name||id)}</h3>
+        <span class="tag">${PROTO_LABEL[a.protocol]||a.protocol}</span>
+        <span class="sp"></span>
+        <label class="onoff" title="启用"><input type="checkbox" ${a.enabled?"checked":""} data-on="${id}"><span class="slider"></span></label>
+      </div>
+      <div class="row grow">
+        <label>账号</label>
+        <select data-acc="${id}">
+          <option value="">默认(auto)</option>
+          ${accOpts.map(r=>`<option value="${r}" ${a.account===r?"selected":""}>${r}</option>`).join("")}
+        </select>
+        <label style="margin-left:8px">模型</label>
+        <select data-model="${id}" style="min-width:180px">
+          ${modelOpts.map(m=>`<option value="${m.plain||m.id}" ${(a.model)===(m.plain||m.id)?"selected":""}>${m.free?"✨ ":""}${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+m.credits:"")}${m.ctx?" · "+fmt(m.ctx):""}</option>`).join("")}
+        </select>
+      </div>
+      <div class="muted">实际调用模型: <code>${esc(effId(a))}</code></div>
+      <textarea id="snip-${id}" readonly>${esc(snippetFor(id,a))}</textarea>
+      <div class="row" style="justify-content:flex-end;margin-top:6px">
+        <button onclick="copySnip('${id}')">📋 复制配置</button>
+        ${anthropicBtn}
+        <button class="primary" onclick="testAgent('${id}')">🔍 测试连通</button>
+      </div>
+      <div class="test" id="ts-${id}"></div>`;
+    card.querySelector(`[data-on="${id}"]`).onchange=e=>{AGENTS[id].enabled=e.target.checked;scheduleSave();};
+    card.querySelector(`[data-acc="${id}"]`).onchange=e=>{AGENTS[id].account=e.target.value;const o=modelsForAccount(e.target.value);if(o.length&&!o.some(x=>x.id===AGENTS[id].model||x.plain===AGENTS[id].model))AGENTS[id].model=o[0].plain||o[0].id;scheduleSave();renderAgents();};
+    card.querySelector(`[data-model="${id}"]`).onchange=e=>{AGENTS[id].model=e.target.value;scheduleSave();};
+    card.querySelector("#snip-"+id).setAttribute("readonly","");
+    box.appendChild(card);
+  }
+}
+function snippetFor(id,agent){
+  const base=EP?EP.base:(BASE||location.origin);
+  const eff=effId(agent);
+  const key="<网关设置的 --api-key,空则留空>";
+  switch(agent.protocol){
+    case "anthropic":
+      return `# Claude Code 走 WorkBuddy 算力
+export ANTHROPIC_BASE_URL=${base}
+export ANTHROPIC_MODEL=${eff}
+export ANTHROPIC_API_KEY=${key}
+claude
+# 或一键脚本: WB_MODEL=${eff} ./scripts/claude-wb.sh`;
+    case "responses":
+      return `# Codex CLI (~/.codex/config.toml)
+[model_providers.workbuddy]
+name = "WorkBuddy"
+base_url = "${base}/v1"
+wire_api = "responses"
+
+[profiles.workbuddy]
+model = "${eff}"
+model_provider = "workbuddy"
+
+# export CODEBUDDY2OPENAI_KEY=<网关 api_key 或任意占位>`;
+    default:
+      return `# OpenAI 兼容客户端(Cherry Studio / ZCode / LobeChat 等)
+接口地址: ${base}/v1
+API Key : ${key}
+模型    : ${eff}`;
+  }
+}
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(async()=>{
+    try{await jjson("/agents",{method:"PUT",body:JSON.stringify({agents:AGENTS})});toast("Agent 配置已保存到 config.json");}
+    catch(e){toast("保存失败:"+e.message);}
+  },450);
+}
+async function testAgent(id){
+  const box=$("ts-"+id);if(!box)return;
+  box.className="test show";box.textContent="测试中…";
+  try{
+    const r=await jjson("/agents/test",{method:"POST",body:JSON.stringify({agent:id,prompt:"你好,请只回复:OK"})});
+    if(r.ok)box.className="test show ok",box.textContent=`✅ 账号 ${r.account} · ${r.model} · credit=${r.credit}\n${(r.content_preview||"(空回复)").slice(0,200)}`;
+    else box.className="test show err",box.textContent=`❌ HTTP ${r.http} ${r.error||""}`;
+  }catch(e){box.className="test show err";box.textContent="❌ "+e.message;}
+}
+function copySnip(id){
+  navigator.clipboard.writeText($("snip-"+id).value).then(()=>toast("已复制 "+id+" 配置"),()=>toast("复制失败"));
+}
+async function ccSwitchReg(id){
+  const box = $("ts-"+id);
+  box.className="test show"; box.textContent="生成 CC Switch 注册链接并唤起…";
+  try{
+    const r = await jjson("/ccswitch/register",{method:"POST",body:JSON.stringify({launch:true})});
+    box.className="test show ok";
+    box.textContent = r.opened
+      ? `✅ 已唤起 CC Switch 注册「${"WorkBuddy 算力网关"} · ${r.model}」。请在弹出的界面里确认/切换。`
+      : `✅ 链接已生成(未自动唤起),复制到浏览器打开:\n${r.url}`;
+  }catch(e){box.className="test show err";box.textContent="❌ "+e.message;}
+}
+
+/* ---------- ② 算力/模型管理 ---------- */
+function renderSettingsPanel(){
+  const acc=$("set-default-account");
+  const regions=accountRegions();
+  acc.innerHTML='<option value="">默认(自动)</option>'+
+    regions.map(r=>`<option value="${r}" ${SETTINGS.default_account===r?"selected":""}>${r}</option>`).join("");
+  $("set-sync-h").value=SETTINGS.model_sync_interval_hours||24;
+}
+async function saveRoutingSettings(){
+  try{
+    await jjson("/settings",{method:"PUT",body:JSON.stringify({
+      default_account:$("set-default-account").value,
+      model_sync_interval_hours:Number($("set-sync-h").value)||24
+    })});
+    toast("路由设置已保存");
+  }catch(e){toast("保存失败:"+e.message);}
+}
+function renderModelTable(){
+  const kw=($("mfilter").value||"").toLowerCase();
+  const f=$("mfree").value;
+  let list=MODELS.filter(m=>{
+    const label=m.id.toLowerCase();
+    if(kw&&!label.includes(kw))return false;
+    if(f==="free"&&!m.free)return false;
+    if(f==="paid"&&m.free)return false;
+    return true;
+  });
+  list.sort((a,b)=>a.account.localeCompare(b.account)||Number(b.free)-Number(a.free)||a.id.localeCompare(b.id));
+  $("mcount").textContent=`共 ${MODELS.length} 个模型,筛选 ${list.length}`;
+  $("model-table").innerHTML=`
+    <tr><th>账号</th><th>模型</th><th>定价</th><th>角标</th><th>上下文</th></tr>`+
+    list.map(m=>`<tr>
+      <td class="tag">${m.account}</td>
+      <td>${m.free?"✨ ":""}${esc(m.id)}</td>
+      <td>${m.free?'<span class="free">免费</span>':(m.credits!=null?"×"+m.credits:'<span class="muted">—</span>')}</td>
+      <td class="muted">${esc((m.badges||[]).join(" ")||"—")}</td>
+      <td class="muted">${fmt(m.ctx)||"—"}</td>
+    </tr>`).join("");
+}
+async function checkin(name){
+  try{const d=await jjson("/credits/checkin",{method:"POST"});
+    const row=(d.accounts||[]).find(a=>a.name===name)||{};
+    toast((row.ok?"✓ ":"")+(row.message||row.error||"已处理"));refreshCredits();}
+  catch(e){toast("签到失败:"+e.message);}
+}
+
+/* ---------- ③ 模型快速测试 ---------- */
+function fillQTestAccounts(){
+  const sel=$("qt-account");sel.innerHTML='<option value="">默认(auto)</option>'+
+    accountRegions().map(r=>`<option value="${r}">${r}</option>`).join("");
+  fillQTestModels();
+}
+function fillQTestModels(){
+  const acc=$("qt-account")?$("qt-account").value:"";
+  const sel=$("qt-model");if(!sel)return;
+  const opts=modelsForAccount(acc);
+  sel.innerHTML=opts.map(m=>`<option value="${m.plain||m.id}" data-id="${m.id}">${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+m.credits:"")}</option>`).join("")||'<option value="">(无可选)</option>';
+}
+async function quickTest(){
+  const acc=$("qt-account").value, model=$("qt-model").value;
+  const prompt=$("qt-prompt").value||"ping";
+  const box=$("qt-result");box.className="test show";box.textContent="测试中…";
+  $("qt-btn").disabled=true;
+  try{
+    const r=await jjson("/agents/test",{method:"POST",body:JSON.stringify({model,account:acc,prompt})});
+    if(r.ok)box.className="test show ok",box.textContent=`✅ 账号 ${r.account} · ${r.model} · credit=${r.credit}\n${(r.content_preview||"(空回复)").slice(0,300)}`;
+    else box.className="test show err",box.textContent=`❌ HTTP ${r.http} ${r.error||""}`;
+  }catch(e){box.className="test show err";box.textContent="❌ "+e.message;}
+  finally{$("qt-btn").disabled=false;}
+}
+
+/* ---------- 工具 ---------- */
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function loadSettings(){BASE=(localStorage.getItem(LS_BASE)||"").replace(/\/+$/,"");API_KEY=localStorage.getItem(LS_KEY)||"";$("set_base").value=BASE;$("set_key").value=API_KEY;}
+function openSettings(){$("settings").classList.add("open");}
+function closeSettings(){$("settings").classList.remove("open");}
+function saveSettings(){BASE=$("set_base").value.trim().replace(/\/+$/,"");API_KEY=$("set_key").value.trim();localStorage.setItem(LS_BASE,BASE);localStorage.setItem(LS_KEY,API_KEY);closeSettings();toast("已保存");refreshAll();}
+
+loadSettings();
+refreshAll();
+</script>
+</body>
+</html>

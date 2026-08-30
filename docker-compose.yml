@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  workbuddy-gateway:
+    build: .
+    container_name: workbuddy-gateway
+    ports:
+      - "8787:8787"
+    volumes:
+      # 挂载宿主机的 WorkBuddy/CodeBuddy 登录态目录(含多个 *.info)
+      - ~/Library/Application Support/CodeBuddyExtension/Data/Public/auth:/data/auth:ro
+      # 可选: 自定义网关配置(config.json)
+      # - ./config.json:/app/config.json:ro
+    environment:
+      # 指定 auth 目录(多账号时整目录挂载)
+      - CODEBUDDY_AUTH_DIR=/data/auth
+      # 本地 API Key(可选)
+      # - WORKBUDDY2API_KEY=
+    command: >
+      python3 converter.py
+      --host 0.0.0.0
+      --port 8787
+      --skip-check
+      --desensitize
+    restart: unless-stopped
