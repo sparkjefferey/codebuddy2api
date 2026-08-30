@@ -27,9 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+            V="${INPUT_TAG:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -74,9 +76,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+            V="${INPUT_TAG:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -122,9 +126,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+            V="${INPUT_TAG:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -156,9 +162,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+            V="${INPUT_TAG:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
