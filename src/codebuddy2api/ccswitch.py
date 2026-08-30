@@ -21,7 +21,7 @@ import urllib.parse
 
 def build_deeplink(*,
                    endpoint: str,
-                   name: str = "WorkBuddy 算力网关",
+                   name: str = "API Transmitter",
                    api_key: str = "workbuddy",
                    model: str | None = None,
                    app: str = "claude") -> str:

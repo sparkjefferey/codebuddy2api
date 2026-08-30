@@ -1,9 +1,9 @@
 version: "3.8"
 
 services:
-  workbuddy-gateway:
+  api-transmitter:
     build: .
-    container_name: workbuddy-gateway
+    container_name: api-transmitter
     ports:
       - "8787:8787"
     volumes:

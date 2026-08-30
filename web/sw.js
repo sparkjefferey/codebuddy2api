@@ -1,4 +1,4 @@
-/* WorkBuddy 算力网关 · Service Worker
+/* API Transmitter · Service Worker
  * 策略：
  *   - 静态资源(壳): 缓存优先 -> 网络回填, 安装时预缓存应用壳
  *   - API 请求(/health /v1/* /agents /settings /credits): 网络优先, 绝不缓存;

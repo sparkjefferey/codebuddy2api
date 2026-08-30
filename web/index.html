@@ -3,20 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#2f6feb">
+<meta name="theme-color" content="#3884ff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="WorkBuddy">
+<meta name="apple-mobile-web-app-title" content="API Transmitter">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<title>WorkBuddy 算力网关 · 控制台</title>
+<title>API Transmitter</title>
 <style>
   :root{
     --bg:#f6f7f9; --panel:#fff; --ink:#1a1d21; --mut:#6b7280; --line:#e5e7eb;
     --acc:#2f6feb; --free:#0f9d58; --warn:#d97706; --err:#dc2626;
     --chip:#eef2ff; --tab:#f0f2f5; --exp:#f9fafb;
+    /* 原生 App 模式下的窗口适配:标题栏拖拽区高度 */
+    --drag:0px;
   }
   @media (prefers-color-scheme: dark){
     :root{
@@ -26,8 +28,32 @@
     }
   }
   *{box-sizing:border-box}
-  body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);height:100vh;display:flex;flex-direction:column}
-  header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  html,body{height:100%}
+  body{margin:0;font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+  /* ── 原生 App 适配 ──────────────────────────────────────────────
+     由 app.py 打开时 URL 带 ?native=1,加 <html class="native">:
+       - 顶部留出标题栏高度,该区域 -webkit-app-region:drag 可拖动窗口;
+       - 隐藏「浏览器打开/PWA」等网页专属提示,改为原生菜单/按钮;
+       - 内容区自己滚动,body 不滚动(更接近原生滚动行为)。          */
+  html.native body{background:transparent}
+  html.native header{
+    padding-top:calc(10px + var(--drag));
+    border-bottom:1px solid var(--line);
+    -webkit-app-region:drag;           /* 拖这里能挪窗口 */
+    user-select:none;
+  }
+  html.native header button,
+  html.native header select,
+  html.native header input{
+    -webkit-app-region:no-drag;        /* 控件仍可点击 */
+  }
+  html.native .web-only{display:none !important}
+  html.native main{overscroll-behavior:contain}
+  /* 非原生模式下隐藏原生专属元素 */
+  html:not(.native) .native-only{display:none !important}
+
+  header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap;flex-shrink:0}
   header h1{font-size:15px;margin:0;font-weight:600}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--mut);display:inline-block}
   .dot.ok{background:var(--free)} .dot.bad{background:var(--err)}
@@ -36,7 +62,8 @@
   button:hover{background:var(--tab)}
   button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
   button:disabled{opacity:.5;cursor:not-allowed}
-  .tabs{display:flex;gap:2px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  button.icon{font-size:14px;padding:6px 9px;line-height:1}
+  .tabs{display:flex;gap:2px;padding:0 12px;background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0}
   .tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;padding:10px 16px;background:transparent;color:var(--mut);font-weight:500}
   .tabs button.on{color:var(--ink);border-bottom-color:var(--acc)}
   main{flex:1;overflow-y:auto;padding:16px;display:none}
@@ -83,9 +110,11 @@
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <h1>WorkBuddy 算力网关 · 控制台</h1>
+  <h1 id="title">API Transmitter</h1>
   <span class="muted" id="cfgfile"></span>
   <div class="sp"></div>
+  <button class="icon native-only" onclick="nativeAct('hide')" title="隐藏到菜单栏(关窗不退出)">⬇︎</button>
+  <button class="icon native-only" onclick="nativeAct('revealLog')" title="在 Finder 中显示日志">📄</button>
   <button onclick="refreshAll()">🔄 刷新</button>
   <button onclick="openSettings()">⚙ 网关设置</button>
 </header>
@@ -105,7 +134,7 @@
 
 <!-- ══════════════ Tab2: 算力 / 模型管理 ══════════════ -->
 <main id="p-compute">
-  <h2>WorkBuddy 账号(算力提供方)</h2>
+  <h2>WorkBuddy 账号(上游算力提供方)</h2>
   <div id="credit-cards"></div>
 
   <h2 style="margin-top:18px">路由默认</h2>
@@ -181,6 +210,86 @@ function toast(msg,ms=2200){const t=$("toast");t.textContent=msg;t.classList.add
 function base(p){return BASE+p;}
 function fmt(n){if(n==null)return "";if(n>=1e6)return (n/1e6).toFixed(1)+"M";if(n>=1000)return Math.round(n/1000)+"k";return n;}
 
+/* ---------- 原生 App 适配 ----------
+   原生窗口里由 app.py 注入 `window.pywebview.api`(NativeApi 实例),
+   可直接调 Python:剪贴板 / 打开文件 / 隐藏窗口 / 退出 / 签到。
+   浏览器(PWA)里没有该对象,所有调用自动降级,不影响网页模式。
+   app.py 用 `?native=1` 打开本页面,此时给 <html> 加 .native 类启用原生样式。
+
+   注意时序:pywebview 的 `window.pywebview` 是**页面 load 之后**才注入的,
+   本脚本同步执行时它还不存在,所以:
+     - 是否“原生窗口”只看 URL 参数(?native=1 由 app.py 加,可信);
+     - 真正调 api 前用 withApi() 等 pywebviewready 事件;
+     - 超时仍拿不到 api(例如手动在浏览器里带上了 ?native=1)则撤销原生样式,
+       回落到纯网页模式,不会出现“样式是原生、功能却是网页”的错配。 */
+const NATIVE = new URLSearchParams(location.search).get("native") === "1";
+
+if (NATIVE) {
+  document.documentElement.classList.add("native");
+  // 标题栏拖拽区:macOS 半透明标题栏(vibrancy)约 28px 高
+  if (navigator.platform.indexOf("Mac") >= 0 || navigator.userAgent.includes("Mac")) {
+    document.documentElement.style.setProperty("--drag", "28px");
+  }
+  // 原生窗口里网关就在本进程,直接用同源地址(忽略 localStorage 里可能残留的远端地址)
+  localStorage.removeItem(LS_BASE);
+  // Cmd/Ctrl+W 关窗 → 走原生隐藏(而非关页面)
+  window.addEventListener("keydown", e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "w") { e.preventDefault(); nativeAct("hide"); }
+  });
+}
+
+/** 等到 pywebview 就绪(window.pywebview.api 注入完成)后返回 api。
+ *  浏览器模式 / 超时都返回 null,调用方按“无原生能力”处理。 */
+function withApi(timeoutMs = 8000) {
+  if (window.pywebview && window.pywebview.api) return Promise.resolve(window.pywebview.api);
+  if (typeof window.pywebview === "undefined" && !NATIVE) return Promise.resolve(null);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      const api = (window.pywebview && window.pywebview.api) ? window.pywebview.api : null;
+      // 带 ?native=1 却拿不到 api:说明其实在普通浏览器里,撤销原生样式。
+      if (!api && NATIVE) {
+        document.documentElement.classList.remove("native");
+        document.documentElement.style.setProperty("--drag", "0px");
+      }
+      resolve(api);
+    };
+    window.addEventListener("pywebviewready", finish);
+    setTimeout(finish, timeoutMs);
+  });
+}
+
+/** 调原生 API;非原生模式静默返回 null。 */
+async function nativeAct(name, ...args) {
+  const api = await withApi();
+  if (!api || typeof api[name] !== "function") return null;
+  try { return await api[name](...args); }
+  catch (e) { console.warn("native call failed:", name, e); return null; }
+}
+
+/** 复制:优先原生剪贴板(不受页面焦点/权限限制),失败回落 Clipboard API。 */
+async function copyText(text, okMsg) {
+  const ok = await nativeAct("copy", text);
+  if (ok) { toast(okMsg || "已复制"); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => toast(okMsg || "已复制"), () => toast("复制失败"));
+    return;
+  }
+  toast("复制失败");
+}
+
+/** 启动时拉一次原生环境(版本/端口/平台),写进标题。 */
+async function loadNativeEnv() {
+  const env = await nativeAct("env");
+  if (!env) return;
+  document.title = env.app_name + " · " + env.host + ":" + env.port;
+  $("title").textContent = env.app_name;
+  if (env.version && env.version !== "dev") $("cfgfile").textContent = "v" + env.version;
+}
+
 /* ---------- 网关逻辑 ---------- */
 async function jfetch(path,opts={}){
   const h=Object.assign({"Content-Type":"application/json"},opts.headers||{});
@@ -213,18 +322,29 @@ async function refreshModels(){
 async function refreshCredits(){
   try{
     const d=await jjson("/credits");
+    // 账号名/后端地址/错误信息都可能含 HTML(后端地址与 error 来自上游响应),
+    // 必须逐字段 esc() 后再拼 innerHTML,否则上游异常内容即可注入脚本。
+    // 签到按钮改用 data-checkin + 事件委托(见下),不再把账号名拼进 onclick 属性——
+    // 账号名里的单引号就能逃逸出属性,esc() 到 HTML 里并不能防住属性内的 JS 注入。
     $("credit-cards").innerHTML=(d.accounts||[]).map(a=>{
-      const ok=a.error?"":`<b class="${a.credits_remaining>0?"free":""}">${a.credits_remaining}</b>`;
+      const nm=esc(a.name||""), rg=esc(a.region||a.name||""), bk=esc(a.backend||"");
+      const ok=a.error?"":`<b class="${a.credits_remaining>0?"free":""}">${esc(a.credits_remaining)}</b>`;
       return `<div class="credits">
-        <span class="tag">${a.region||a.name}</span>
-        <span><b>${a.name}</b> <span class="muted">${a.backend||""}</span></span>
-        剩余 ${ok||'<span class="muted">'+a.error+'</span>'}
+        <span class="tag">${rg}</span>
+        <span><b>${nm}</b> <span class="muted">${bk}</span></span>
+        剩余 ${ok||'<span class="muted">'+esc(a.error)+'</span>'}
         <span class="sp"></span>
-        <button onclick="checkin('${a.name}')">🎫 签到</button>
+        <button data-checkin="${esc(a.name||"")}">🎫 签到</button>
       </div>`;
     }).join("")||'<div class="muted">无账号</div>';
   }catch(e){$("credit-cards").innerHTML='<div class="muted">积分接口不可用</div>';}
 }
+
+// 账号卡片里的签到按钮:委托到容器,避免把账号名拼进 onclick 属性。
+$("credit-cards").addEventListener("click", e=>{
+  const btn=e.target.closest("[data-checkin]");
+  if(btn) checkin(btn.getAttribute("data-checkin"));
+});
 
 /* ---------- 切换 Tab ---------- */
 function switchTab(name){
@@ -259,34 +379,34 @@ function renderAgents(){
     const accOpts=accountRegions();
     const modelOpts=modelsForAccount(a.account||"");
     const anthropicBtn = a.protocol==="anthropic"
-      ? `<button onclick="ccSwitchReg('${id}')">⚡ 注册 CC Switch</button>`
+      ? `<button data-ccswitch="${esc(id)}">⚡ 注册 CC Switch</button>`
       : "";
     card.innerHTML=`
       <div class="o-l">
         <h3>${esc(a.name||id)}</h3>
-        <span class="tag">${PROTO_LABEL[a.protocol]||a.protocol}</span>
+        <span class="tag">${esc(PROTO_LABEL[a.protocol]||a.protocol||"")}</span>
         <span class="sp"></span>
-        <label class="onoff" title="启用"><input type="checkbox" ${a.enabled?"checked":""} data-on="${id}"><span class="slider"></span></label>
+        <label class="onoff" title="启用"><input type="checkbox" ${a.enabled?"checked":""} data-on="${esc(id)}"><span class="slider"></span></label>
       </div>
       <div class="row grow">
         <label>账号</label>
-        <select data-acc="${id}">
+        <select data-acc="${esc(id)}">
           <option value="">默认(auto)</option>
-          ${accOpts.map(r=>`<option value="${r}" ${a.account===r?"selected":""}>${r}</option>`).join("")}
+          ${accOpts.map(r=>`<option value="${esc(r)}" ${a.account===r?"selected":""}>${esc(r)}</option>`).join("")}
         </select>
         <label style="margin-left:8px">模型</label>
-        <select data-model="${id}" style="min-width:180px">
-          ${modelOpts.map(m=>`<option value="${m.plain||m.id}" ${(a.model)===(m.plain||m.id)?"selected":""}>${m.free?"✨ ":""}${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+m.credits:"")}${m.ctx?" · "+fmt(m.ctx):""}</option>`).join("")}
+        <select data-model="${esc(id)}" style="min-width:180px">
+          ${modelOpts.map(m=>`<option value="${esc(m.plain||m.id)}" ${(a.model)===(m.plain||m.id)?"selected":""}>${m.free?"✨ ":""}${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+esc(m.credits):"")}${m.ctx?" · "+esc(fmt(m.ctx)):""}</option>`).join("")}
         </select>
       </div>
       <div class="muted">实际调用模型: <code>${esc(effId(a))}</code></div>
-      <textarea id="snip-${id}" readonly>${esc(snippetFor(id,a))}</textarea>
+      <textarea id="snip-${esc(id)}" readonly>${esc(snippetFor(id,a))}</textarea>
       <div class="row" style="justify-content:flex-end;margin-top:6px">
-        <button onclick="copySnip('${id}')">📋 复制配置</button>
+        <button data-copy="${esc(id)}">📋 复制配置</button>
         ${anthropicBtn}
-        <button class="primary" onclick="testAgent('${id}')">🔍 测试连通</button>
+        <button class="primary" data-test="${esc(id)}">🔍 测试连通</button>
       </div>
-      <div class="test" id="ts-${id}"></div>`;
+      <div class="test" id="ts-${esc(id)}"></div>`;
     card.querySelector(`[data-on="${id}"]`).onchange=e=>{AGENTS[id].enabled=e.target.checked;scheduleSave();};
     card.querySelector(`[data-acc="${id}"]`).onchange=e=>{AGENTS[id].account=e.target.value;const o=modelsForAccount(e.target.value);if(o.length&&!o.some(x=>x.id===AGENTS[id].model||x.plain===AGENTS[id].model))AGENTS[id].model=o[0].plain||o[0].id;scheduleSave();renderAgents();};
     card.querySelector(`[data-model="${id}"]`).onchange=e=>{AGENTS[id].model=e.target.value;scheduleSave();renderAgents();};
@@ -294,6 +414,17 @@ function renderAgents(){
     box.appendChild(card);
   }
 }
+
+// Agent 卡片上的按钮:统一委托到容器,避免把 id 拼进 onclick 属性。
+// 卡片每次 renderAgents() 都会重建,所以委托挂在持久的容器上。
+$("agent-cards").addEventListener("click", e=>{
+  const b=e.target.closest("button[data-copy],button[data-test],button[data-ccswitch]");
+  if(!b) return;
+  if(b.hasAttribute("data-copy"))    copySnip(b.getAttribute("data-copy"));
+  else if(b.hasAttribute("data-test")) testAgent(b.getAttribute("data-test"));
+  else if(b.hasAttribute("data-ccswitch")) ccSwitchReg(b.getAttribute("data-ccswitch"));
+});
+
 function snippetFor(id,agent){
   const base=EP?EP.base:(BASE||location.origin);
   const eff=effId(agent);
@@ -342,7 +473,7 @@ async function testAgent(id){
   }catch(e){box.className="test show err";box.textContent="❌ "+e.message;}
 }
 function copySnip(id){
-  navigator.clipboard.writeText($("snip-"+id).value).then(()=>toast("已复制 "+id+" 配置"),()=>toast("复制失败"));
+  copyText($("snip-"+id).value, "已复制 "+id+" 配置");
 }
 async function ccSwitchReg(id){
   const box = $("ts-"+id);
@@ -351,7 +482,7 @@ async function ccSwitchReg(id){
     const r = await jjson("/ccswitch/register",{method:"POST",body:JSON.stringify({launch:true})});
     box.className="test show ok";
     box.textContent = r.opened
-      ? `✅ 已唤起 CC Switch 注册「${"WorkBuddy 算力网关"} · ${r.model}」。请在弹出的界面里确认/切换。`
+      ? `✅ 已唤起 CC Switch 注册「${"API Transmitter"} · ${r.model}」。请在弹出的界面里确认/切换。`
       : `✅ 链接已生成(未自动唤起),复制到浏览器打开:\n${r.url}`;
   }catch(e){box.className="test show err";box.textContent="❌ "+e.message;}
 }
@@ -361,7 +492,7 @@ function renderSettingsPanel(){
   const acc=$("set-default-account");
   const regions=accountRegions();
   acc.innerHTML='<option value="">默认(自动)</option>'+
-    regions.map(r=>`<option value="${r}" ${SETTINGS.default_account===r?"selected":""}>${r}</option>`).join("");
+    regions.map(r=>`<option value="${esc(r)}" ${SETTINGS.default_account===r?"selected":""}>${esc(r)}</option>`).join("");
   $("set-sync-h").value=SETTINGS.model_sync_interval_hours||24;
 }
 async function saveRoutingSettings(){
@@ -388,11 +519,11 @@ function renderModelTable(){
   $("model-table").innerHTML=`
     <tr><th>账号</th><th>模型</th><th>定价</th><th>角标</th><th>上下文</th></tr>`+
     list.map(m=>`<tr>
-      <td class="tag">${m.account}</td>
+      <td class="tag">${esc(m.account)}</td>
       <td>${m.free?"✨ ":""}${esc(m.id)}</td>
-      <td>${m.free?'<span class="free">免费</span>':(m.credits!=null?"×"+m.credits:'<span class="muted">—</span>')}</td>
+      <td>${m.free?'<span class="free">免费</span>':(m.credits!=null?"×"+esc(m.credits):'<span class="muted">—</span>')}</td>
       <td class="muted">${esc((m.badges||[]).join(" ")||"—")}</td>
-      <td class="muted">${fmt(m.ctx)||"—"}</td>
+      <td class="muted">${esc(fmt(m.ctx))||"—"}</td>
     </tr>`).join("");
 }
 async function checkin(name){
@@ -405,14 +536,14 @@ async function checkin(name){
 /* ---------- ③ 模型快速测试 ---------- */
 function fillQTestAccounts(){
   const sel=$("qt-account");sel.innerHTML='<option value="">默认(auto)</option>'+
-    accountRegions().map(r=>`<option value="${r}">${r}</option>`).join("");
+    accountRegions().map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join("");
   fillQTestModels();
 }
 function fillQTestModels(){
   const acc=$("qt-account")?$("qt-account").value:"";
   const sel=$("qt-model");if(!sel)return;
   const opts=modelsForAccount(acc);
-  sel.innerHTML=opts.map(m=>`<option value="${m.plain||m.id}" data-id="${m.id}">${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+m.credits:"")}</option>`).join("")||'<option value="">(无可选)</option>';
+  sel.innerHTML=opts.map(m=>`<option value="${esc(m.plain||m.id)}" data-id="${esc(m.id)}">${esc(m.plain||m.id)}${m.free?" · 免费":(m.credits!=null?" · ×"+esc(m.credits):"")}</option>`).join("")||'<option value="">(无可选)</option>';
 }
 async function quickTest(){
   const acc=$("qt-account").value, model=$("qt-model").value;
@@ -436,9 +567,11 @@ function saveSettings(){BASE=$("set_base").value.trim().replace(/\/+$/,"");API_K
 
 loadSettings();
 refreshAll();
+loadNativeEnv();
 
-/* ---------- PWA: 注册 Service Worker(仅同源,用于安装为应用/离线壳) ---------- */
-if ('serviceWorker' in navigator) {
+/* ---------- PWA: 注册 Service Worker(仅同源,用于浏览器里安装为应用/离线壳) ----------
+   原生 App 里不需要:窗口本身就是原生壳,注册 SW 反而可能缓存旧页面。 */
+if (!NATIVE && 'serviceWorker' in navigator) {
   try { navigator.serviceWorker.register('/sw.js'); }
   catch (e) { console.warn('SW 注册失败', e); }
 }

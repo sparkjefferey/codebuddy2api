@@ -4,17 +4,24 @@
 # 双击运行即可：注册 launchd 自启 + 立刻启动 + 打开控制台( http://127.0.0.1:8787 )。
 #
 # 同时兼容两种形态，自动定位二进制：
-#   .app  : .../WorkBuddy Gateway.app/Contents/Resources/launchagent-first-run.sh
+#   .app  : .../gateway.app/Contents/Resources/launchagent-first-run.sh
 #           → 二进制在 Contents/MacOS/gateway
 #   便携  : <解压目录>/launchagent-first-run.sh → 二进制在同目录 gateway
 # 卸载  : ./launchagent-first-run.sh uninstall
 #
+# 适用范围说明：
+#   这是【无头网关】产物(gateway.app / 便携 gateway/)的安装入口 —— 它没有界面，
+#   需要一个脚本来「注册自启 + 立即启动 + 打开控制台」。
+#   【原生 App】产物(API Transmitter.app)不需要本脚本：拖进「应用程序」双击
+#   即可运行；要登录自启，在系统设置 → 通用 → 登录项与扩展 里添加，或用仓库的
+#   MODE=app ./scripts/install-launchagent.sh 注册。
+#
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LABEL="com.workbuddy.gateway"
+LABEL="com.apitransmitter.gateway"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOGDIR="$HOME/Library/Logs/WorkBuddyGateway"
+LOGDIR="$HOME/Library/Logs/ApiTransmitter"
 LOG="$LOGDIR/gateway.log"
 
 # 定位二进制

@@ -1,3 +1,10 @@
 fastapi
 uvicorn[standard]
 httpx
+
+# 原生桌面 App(python -m codebuddy2api.app)需要 pywebview。
+# 各平台后端依赖由 pywebview 按 sys_platform 自行解析:
+#   macOS   → pyobjc(Cocoa / WKWebView)
+#   Windows → pythonnet(WinForms / Edge WebView2)
+#   Linux   → 需系统包 libwebkit2gtk-4.1 + gir1.2-webkit2-4.1,见 requirements-app.txt
+pywebview>=6.0

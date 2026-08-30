@@ -1,0 +1,26 @@
+# 原生桌面 App 的可选依赖(python -m codebuddy2api.app)。
+#
+# 只用 headless 网关(python -m codebuddy2api.converter)时**不需要**这些。
+# 安装: pip install -r requirements.txt -r requirements-app.txt
+#
+# 注意:不要写 `pywebview[gtk]` —— 该 extra 把 PyGObject 死钉在 ==3.50.0,
+# 该版本无 wheel 且需本地编译,在多数环境会直接安装失败。这里只约束平台后端。
+
+pywebview>=6.0
+
+# macOS:Cocoa / WKWebView(pywebview 已按 sys_platform 自动依赖,此处显式列出便于审计)
+pyobjc-core>=9.0; sys_platform == 'darwin'
+pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'
+pyobjc-framework-WebKit>=9.0; sys_platform == 'darwin'
+pyobjc-framework-Quartz>=9.0; sys_platform == 'darwin'
+pyobjc-framework-security>=9.0; sys_platform == 'darwin'
+pyobjc-framework-UniformTypeIdentifiers>=9.0; sys_platform == 'darwin'
+
+# Windows:WinForms / Edge WebView2
+pythonnet; sys_platform == 'win32'
+
+# Linux:WebKitGTK。**必须先装系统包**(PyGObject 需要编译/绑定系统库):
+#   Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 gir1.2-webkit2-4.1
+#   Fedora       : sudo dnf install webkit2gtk4.1
+# 装完再: pip install PyGObject
+# 系统包缺失时 App 会自动降级为 headless(浏览器打开控制台)。

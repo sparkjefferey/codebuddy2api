@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install-launchagent.sh — macOS 一键启停 WorkBuddy 算力网关(LaunchAgent)。
+# install-launchagent.sh — macOS 一键启停 API Transmitter(LaunchAgent)。
 #
 # 用法:
 #   ./scripts/install-launchagent.sh            # 安装(写 plist)并启动
@@ -9,16 +9,21 @@
 #   ./scripts/install-launchagent.sh status     # 查看状态
 #   ./scripts/install-launchagent.sh uninstall  # 卸载并停止
 #
-# 说明: 可选。安装后网关随登录自启、日志轮转,意外退出由 launchd 拉起。
+# 说明:
+#   - 默认装【无头网关】(converter),界面在浏览器/PWA 打开;
+#   - 环境变量 MODE=app 装【原生桌面 App】(app.py:网关同进程 + 原生窗口 + 菜单栏);
+#   - 安装后随登录自启、日志轮转,意外退出由 launchd 拉起。
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LABEL="com.workbuddy.gateway"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+MODE="${MODE:-gateway}"                 # gateway(无头) | app(原生 App)
+# 原生 App 用独立 label,便于与无头网关并存(两者可同时装)
+LABEL="${LABEL:-$( [[ "$MODE" == "app" ]] && echo "com.apitransmitter.gateway.app" || echo "com.apitransmitter.gateway" )}"
 PYBIN="$ROOT/.venv/bin/python"
 LOG="$ROOT/gateway.log"
 CMD="${1:-install}"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 log()  { echo "$@"; }
 run()  { launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true; }
@@ -41,7 +46,7 @@ write_plist() {
   <array>
     <string>$PYBIN</string>
     <string>-m</string>
-    <string>codebuddy2api.converter</string>
+    <string>$( [[ "$MODE" == "app" ]] && echo "codebuddy2api.app" || echo "codebuddy2api.converter" )</string>
     <string>--desensitize</string>
     <string>--skip-check</string>
     <string>--log</string>
@@ -67,8 +72,9 @@ case "$CMD" in
     write_plist
     load
     log "✅ 已安装并启动 $LABEL ( $PLIST )"
-    log "   状态    : $ROOT/scripts/install-launchagent.sh status"
-    log "   停止    : $ROOT/scripts/install-launchagent.sh stop"
+    log "   模式    : $( [[ "$MODE" == "app" ]] && echo '原生 App(窗口+菜单栏)' || echo '无头网关(浏览器打开)' )"
+    log "   状态    : MODE=$MODE $ROOT/scripts/install-launchagent.sh status"
+    log "   停止    : MODE=$MODE $ROOT/scripts/install-launchagent.sh stop"
     log "   日志    : $LOG"
     ;;
   start)

@@ -1,0 +1,15 @@
+[Unit]
+Description=API Transmitter (OpenAI/Anthropic/Responses 本地网关)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/opt/api-transmitter
+ExecStart=%h/.local/opt/api-transmitter/gateway --desensitize --skip-check --log %h/.local/opt/api-transmitter/gateway.log
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:%h/.local/opt/api-transmitter/gateway.log
+StandardError=append:%h/.local/opt/api-transmitter/gateway.log
+
+[Install]
+WantedBy=default.target

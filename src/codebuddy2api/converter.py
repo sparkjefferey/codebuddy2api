@@ -30,6 +30,11 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# 让「直接跑脚本」(`python src/codebuddy2api/converter.py`)也能 import 到同包模块
+# (官方用法是 `python -m codebuddy2api.converter`)。
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
@@ -106,6 +111,11 @@ def _log(msg: str):
 def _truncate(s: str, n: int = 80) -> str:
     s = str(s).replace("\n", " ").strip()
     return s[:n] + ("…" if len(s) > n else "")
+
+
+# 单条响应写进日志的原始 SSE 上限。流式响应可能很长(大产出/长对话/上游异常循环),
+# 全量缓冲会让内存随响应长度无界增长;这里只留前 200KB 采样,够排查问题即可。
+RAW_LOG_LIMIT = 200 * 1024
 
 
 def _safe_err_raw(raw: bytes, status: int) -> dict:
@@ -233,7 +243,12 @@ def _chain_for(model: str, header: str | None) -> list[CredentialManager]:
 
 async def _post_with_failover(chain: list[CredentialManager], path: str, body: dict,
                               *, model: str = "", rid: str = "") -> tuple[CredentialManager | None, int, bytes]:
-    """对候选账号逐个尝试,鉴权/模型缺失时切换;返回 (cred, status, raw)。"""
+    """对候选账号逐个尝试,鉴权/模型缺失时切换;返回 (cred, status, raw)。
+
+    全部账号都失败时,返回**最后一个账号的真实错误**(而不是笼统的 502 + 空 body),
+    否则调用方/用户无法区分「token 失效(401)」和「网络故障」——这两种处置完全不同。
+    """
+    last_cred: CredentialManager | None = chain[0] if chain else None
     last_status, last_raw = 502, b""
     for cred in chain:
         url = f"{cred.backend_base}{path}"
@@ -245,19 +260,21 @@ async def _post_with_failover(chain: list[CredentialManager], path: str, body: d
                     if _is_authish(r.status_code, raw):
                         if len(chain) > 1:
                             _log(f"[{rid}] ↻ 账号[{cred.name}] 鉴权失败 code={r.status_code},切换账号")
+                            last_cred, last_status, last_raw = cred, r.status_code, raw
                             continue
                     elif _is_model_missing(raw):
                         if len(chain) > 1:
                             _log(f"[{rid}] ↻ 账号[{cred.name}] 无模型 {model},切换到其他账号")
+                            last_cred, last_status, last_raw = cred, r.status_code, raw
                             continue
                     return cred, r.status_code, raw
         except httpx.HTTPError as e:
-            last_status, last_raw = 502, str(e).encode()
+            last_cred, last_status, last_raw = cred, 502, str(e).encode()
             if len(chain) > 1:
                 _log(f"[{rid}] ↻ 账号[{cred.name}] 网络错误,切换账号: {e}")
                 continue
-            return chain[0], last_status, last_raw
-    return (chain[0] if chain else None), last_status, last_raw
+            return last_cred, last_status, last_raw
+    return last_cred, last_status, last_raw
 
 
 async def _stream_raw_with_failover(chain: list[CredentialManager], path: str, body: dict,
@@ -269,10 +286,17 @@ async def _stream_raw_with_failover(chain: list[CredentialManager], path: str, b
     tool_names: list[str] = []
     saw_filter = False
     buf = b""
-    raw_parts: list[bytes] = []
+    # 日志采样缓冲:直接用 bytearray 累积整条流会让内存随响应长度无界增长
+    # (上游一次大响应 / 错误循环流可达 GB 级),而日志实际只打印前 RAW_LOG_LIMIT 字节。
+    # 这里只保留前 RAW_LOG_LIMIT 字节 + 总字节数,内存占用恒定。
+    raw_log = bytearray()
+    raw_total = 0
 
     def _feed(chunk: bytes):
-        nonlocal finish_reason, saw_filter, buf
+        nonlocal finish_reason, saw_filter, buf, raw_total
+        if len(raw_log) < RAW_LOG_LIMIT:
+            raw_log.extend(chunk[: RAW_LOG_LIMIT - len(raw_log)])
+        raw_total += len(chunk)
         buf += chunk
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
@@ -322,13 +346,11 @@ async def _stream_raw_with_failover(chain: list[CredentialManager], path: str, b
                     if _first_chunk_authish(first) and len(chain) > 1:
                         _log(f"{prefix}↻ 账号[{cred.name}] 首块含鉴权错误,切换账号")
                         continue
-                    raw_parts.append(first)
-                    _feed(first)
+                    _feed(first)          # 缓冲由 _feed 维护,不再另行 append
                     yield first
                     async for chunk in agen:
                         if not chunk:
                             continue
-                        raw_parts.append(chunk)
                         _feed(chunk)
                         yield chunk
                     break
@@ -344,7 +366,9 @@ async def _stream_raw_with_failover(chain: list[CredentialManager], path: str, b
     _log(f"{prefix}◀ RESPONSE {model} | {elapsed:.1f}s | finish={finish_reason}{tag}"
          + (f" | tool_calls={tool_names[:6]}" if tool_names else "")
          + f" | tokens={usage.get('total_tokens', '?')}")
-    _log(f"{prefix}── RESPONSE RAW SSE (前200KB) ──\n{b''.join(raw_parts)[:200000].decode('utf-8','replace')}")
+    truncated = " …(已截断,完整长度 " + str(raw_total) + "B)" if raw_total > len(raw_log) else ""
+    _log(f"{prefix}── RESPONSE RAW SSE (前{RAW_LOG_LIMIT // 1024}KB{truncated}) ──\n"
+         f"{bytes(raw_log).decode('utf-8', 'replace')}")
 
 
 async def _collect_from_raw(raw: bytes) -> dict:
@@ -791,13 +815,30 @@ def _agent_effective_model(agent: dict, model: str | None = None,
 
 
 def _persist_cfg() -> str:
-    """把当前 cfg 的「可管理字段」写回配置文件(不覆盖 host/port/api_key 等)。"""
+    """把当前 cfg 的「可管理字段」写回配置文件(不覆盖 host/port/api_key 等)。
+
+    配置文件解析失败时**不覆盖原文件**:早先这里用 `data = {}` 兜底,随后
+    os.replace 会用只有可管理字段的内容盖掉原文件,导致用户手改坏的
+    host/port/api_key 被静默清空(用户本想靠页面修配置,结果整份丢失)。
+    现在改为:把坏文件备份成 .corrupt-<时间戳>,写干净的到原路径。
+    """
     with CFG_LOCK:
         path = STATE.get("config_file") or str(Path("config.json"))
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-        except Exception:
+            if not isinstance(data, dict):
+                raise ValueError(f"配置不是 JSON 对象: {type(data).__name__}")
+        except FileNotFoundError:
+            data = {}
+        except Exception as e:
+            # 原文件不可解析:先备份,绝不直接覆盖丢弃。
+            try:
+                bak = f"{path}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+                os.replace(path, bak)
+                _log(f"⚠️ 配置文件无法解析({e}),已备份到 {bak};将写入新配置: {path}")
+            except OSError:
+                _log(f"⚠️ 配置文件无法解析({e})且备份失败,将写入新配置: {path}")
             data = {}
         c = cfg()
         data.update({
@@ -967,7 +1008,7 @@ async def register_ccswitch(request: Request,
     c = cfg()
     endpoint = body.get("endpoint") or f"http://{_display_host(c)}:{c.port}"
     api_key = body.get("api_key") if body.get("api_key") is not None else (c.api_key or "workbuddy")
-    name = body.get("name") or "WorkBuddy 算力网关"
+    name = body.get("name") or "API Transmitter"
 
     url = ccswitch.build_deeplink(endpoint=endpoint, name=name, api_key=api_key,
                                   model=effective, app="claude")
@@ -982,7 +1023,10 @@ async def register_ccswitch(request: Request,
 # 静态资源 + PWA(在所有 API 路由之后挂载,以免遮蔽 /health /v1/* /agents 等)
 # ---------------------------------------------------------------------------
 
-_web_dir = Path(__file__).resolve().parents[2] / "web"
+# 静态资源目录与 index() 取同一处:PyInstaller 冻结时数据在 _MEIPASS(`web/`),
+# 源码树运行时是仓库根(src/../web)。早先这里硬编码源码树路径,导致打包后
+# /icons/* /manifest.webmanifest 全部 404(PWA 图标、安装为 App 都会失效)。
+_web_dir = _resource_root() / "web"
 if _web_dir.is_dir():
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="app")

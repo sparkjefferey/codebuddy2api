@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
-# notarize.sh — 签 macOS .app + 出 .dmg + Apple 公证/stapl e。
-# 用法: 在打包 repo 根运行（dist/gateway.app 已由 PyInstaller 生成）。
+# notarize.sh — 签 macOS .app + 出 .dmg + Apple 公证/staple。
+# 用法: 在打包 repo 根运行（dist/ 下的 .app 已由 PyInstaller 生成）。
 #   ./packaging/macos/notarize.sh <out-dmg-path>
 #
-# 环境变量（优先走仓库 Secret 名称，便于 workflow 直接注入）:
+# 环境变量:
+#   APP_BUNDLE  要签的 .app 路径。默认 dist/gateway.app；打原生 App 时传
+#               dist/API Transmitter.app
+#   VOL         dmg 卷标，默认 "API Transmitter"
 #   MACOS_DEV_ID_CERT      签名身份，如 "Developer ID Application: xx (TEAM)"
 #   MACOS_CERT_P12         可选：base64 的 Developer ID .p12
 #   MACOS_CERT_PASSWORD    p12 口令
@@ -17,11 +20,16 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP="dist/gateway.app"
+APP="${APP_BUNDLE:-dist/gateway.app}"
 OUT="${1:-gateway-mac.dmg}"
-VOL="WorkBuddy Gateway"
+VOL="${VOL:-API Transmitter}"
 
 : "${MACOS_DEV_ID_CERT:=}"
+
+if [[ ! -d "$APP" ]]; then
+  echo "❌ 找不到待签名的 bundle: $APP" >&2
+  exit 1
+fi
 
 # ---- 1) 导入签名证书(可选) ----
 if [[ -n "${MACOS_CERT_P12:-}" ]]; then
@@ -75,7 +83,7 @@ fi
 rm -f dmg_err.txt
 echo "::endgroup::"
 
-# ---- 4) 公证(.dmg) + stapl e ----
+# ---- 4) 公证(.dmg) + staple ----
 if [[ -n "${APPLE_NOTARIZE_API_KEY:-}" && -n "${APPLE_NOTARIZE_API_KEY_ID:-}" && -n "${APPLE_NOTARIZE_TEAM_ID:-}" ]]; then
   if [[ "$have_sign" == "0" ]]; then
     echo "⚠️  有公证凭据但无签名身份($MACOS_DEV_ID_CERT)。跳过公证（公证前提是先签名）。"
@@ -92,11 +100,11 @@ if [[ -n "${APPLE_NOTARIZE_API_KEY:-}" && -n "${APPLE_NOTARIZE_API_KEY_ID:-}" &&
         --key-id "$APPLE_NOTARIZE_API_KEY_ID" \
         --team-id "$APPLE_NOTARIZE_TEAM_ID" \
         --wait; then
-      echo "❌ notarize 失败，按失败产物上传（未 stapl e）。"
+      echo "❌ notarize 失败，按失败产物上传（未 staple）。"
       exit 0
     fi
     if xcrun stapler staple "$OUT"; then
-      echo "✅ stapl e OK"
+      echo "✅ staple OK"
     else
       echo "⚠️  stapler 失败（Gatekeeper 仍可右键打开）。"
     fi

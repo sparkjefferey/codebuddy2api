@@ -1,7 +1,11 @@
 name: build-release
 
-# 打 vX.Y.Z tag 自动构建多平台安装包/便携包并发布 GitHub Release。
+# 打 vX.Y.Z tag 自动构建多平台产物并发布 GitHub Release。
 # workflow_dispatch 可在分支上手动跑以先验证构建(不建 Release)。
+#
+# 每个平台出两套产物(TARGET 环境变量):
+#   gateway → 无头网关服务端,配浏览器/PWA 使用
+#   app     → 原生桌面 App(WKWebView / WebView2 / WebKitGTK + 网关同进程)
 on:
   push:
     tags: ["v*"]
@@ -25,7 +29,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+          pip install -r requirements.txt -r requirements-app.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
         env:
           INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
@@ -37,10 +41,29 @@ jobs:
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "$V" > VERSION
-      - name: Build with PyInstaller
-        env: { OS: "mac" }
+      # ---- 1) 原生 App(先打:公证步骤会用到 dist/) ----
+      - name: Build App with PyInstaller
+        env: { OS: "mac", TARGET: "app" }
         run: pyinstaller packaging/gateway.spec --noconfirm
-      - name: Sign + notarize + dmg
+      - name: Sign + notarize + dmg (App)
+        env:
+          MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
+          MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
+          MACOS_CERT_PASSWORD: "${{ secrets.MACOS_CERT_PASSWORD }}"
+          APPLE_NOTARIZE_API_KEY: "${{ secrets.APPLE_NOTARIZE_API_KEY }}"
+          APPLE_NOTARIZE_API_KEY_ID: "${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}"
+          APPLE_NOTARIZE_TEAM_ID: "${{ secrets.APPLE_NOTARIZE_TEAM_ID }}"
+        run: |
+          chmod +x packaging/macos/notarize.sh
+          APP_BUNDLE="dist/API Transmitter.app" ./packaging/macos/notarize.sh WorkBuddy-Gateway-mac-arm64-app.dmg
+      - name: Portable zip (App)
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/API Transmitter.app" WorkBuddy-Gateway-mac-arm64-app.zip
+      # ---- 2) 无头网关 ----
+      - name: Build gateway with PyInstaller
+        env: { OS: "mac", TARGET: "gateway" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Sign + notarize + dmg (gateway)
         env:
           MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
           MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
@@ -51,7 +74,7 @@ jobs:
         run: |
           chmod +x packaging/macos/notarize.sh
           ./packaging/macos/notarize.sh gateway-mac-arm64.dmg
-      - name: Portable zip (green)
+      - name: Portable zip (gateway)
         run: |
           cp packaging/macos/launchagent-first-run.sh dist/gateway/
           ditto -c -k --sequesterRsrc --keepParent dist/gateway gateway-mac-arm64-portable.zip
@@ -61,6 +84,8 @@ jobs:
           name: mac-arm64
           if-no-files-found: error
           path: |
+            WorkBuddy-Gateway-mac-arm64-app.dmg
+            WorkBuddy-Gateway-mac-arm64-app.zip
             gateway-mac-arm64.dmg
             gateway-mac-arm64-portable.zip
 
@@ -74,7 +99,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+          pip install -r requirements.txt -r requirements-app.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
         env:
           INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
@@ -86,10 +111,29 @@ jobs:
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "$V" > VERSION
-      - name: Build with PyInstaller
-        env: { OS: "mac" }
+      # ---- 1) 原生 App ----
+      - name: Build App with PyInstaller
+        env: { OS: "mac", TARGET: "app" }
         run: pyinstaller packaging/gateway.spec --noconfirm
-      - name: Sign + notarize + dmg
+      - name: Sign + notarize + dmg (App)
+        env:
+          MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
+          MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
+          MACOS_CERT_PASSWORD: "${{ secrets.MACOS_CERT_PASSWORD }}"
+          APPLE_NOTARIZE_API_KEY: "${{ secrets.APPLE_NOTARIZE_API_KEY }}"
+          APPLE_NOTARIZE_API_KEY_ID: "${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}"
+          APPLE_NOTARIZE_TEAM_ID: "${{ secrets.APPLE_NOTARIZE_TEAM_ID }}"
+        run: |
+          chmod +x packaging/macos/notarize.sh
+          APP_BUNDLE="dist/API Transmitter.app" ./packaging/macos/notarize.sh WorkBuddy-Gateway-mac-x86_64-app.dmg
+      - name: Portable zip (App)
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/API Transmitter.app" WorkBuddy-Gateway-mac-x86_64-app.zip
+      # ---- 2) 无头网关 ----
+      - name: Build gateway with PyInstaller
+        env: { OS: "mac", TARGET: "gateway" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Sign + notarize + dmg (gateway)
         env:
           MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
           MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
@@ -100,7 +144,7 @@ jobs:
         run: |
           chmod +x packaging/macos/notarize.sh
           ./packaging/macos/notarize.sh gateway-mac-x86_64.dmg
-      - name: Portable zip (green)
+      - name: Portable zip (gateway)
         run: |
           cp packaging/macos/launchagent-first-run.sh dist/gateway/
           ditto -c -k --sequesterRsrc --keepParent dist/gateway gateway-mac-x86_64-portable.zip
@@ -110,6 +154,8 @@ jobs:
           name: mac-x86_64
           if-no-files-found: error
           path: |
+            WorkBuddy-Gateway-mac-x86_64-app.dmg
+            WorkBuddy-Gateway-mac-x86_64-app.zip
             gateway-mac-x86_64.dmg
             gateway-mac-x86_64-portable.zip
 
@@ -124,7 +170,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+          pip install -r requirements.txt -r requirements-app.txt pyinstaller pyinstaller-hooks-contrib
       - name: Resolve version
         env:
           INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
@@ -136,8 +182,17 @@ jobs:
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "$V" > VERSION
-      - name: Build with PyInstaller
-        env: { OS: "win" }
+      # ---- 1) 原生 App(WebView2) ----
+      - name: Build App with PyInstaller
+        env: { OS: "win", TARGET: "app" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Zip App
+        run: |
+          cp packaging/windows/install.bat dist/ApiTransmitter/
+          cd dist && tar -a -c -f ../WorkBuddy-Gateway-win-x64-app.zip ApiTransmitter
+      # ---- 2) 无头网关 ----
+      - name: Build gateway with PyInstaller
+        env: { OS: "win", TARGET: "gateway" }
         run: pyinstaller packaging/gateway.spec --noconfirm
       - name: Bundle installer bat + zip
         run: |
@@ -148,7 +203,9 @@ jobs:
         with:
           name: windows
           if-no-files-found: error
-          path: gateway-win-x64.zip
+          path: |
+            WorkBuddy-Gateway-win-x64-app.zip
+            gateway-win-x64.zip
 
   # ============ Linux x86_64 ============
   linux:
@@ -161,6 +218,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+      # Linux 原生 App 需要 WebKitGTK 系统库(GTK 后端);缺失时 App 会降级为 headless。
+      - name: Install WebKitGTK (for native App)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-0 gir1.2-webkit2-4.1
+      - name: Install App deps (GTK backend)
+        run: |
+          pip install -r requirements-app.txt
+          pip install PyGObject || echo "⚠️ PyGObject 安装失败,App 将降级为 headless"
       - name: Resolve version
         env:
           INPUT_TAG: ${{ inputs.tag }}   # 先让 GitHub 替换，shell 再取默认值
@@ -172,12 +238,19 @@ jobs:
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "$V" > VERSION
-      - name: Build with PyInstaller
-        env: { OS: "linux" }
+      # ---- 1) 原生 App(WebKitGTK) ----
+      - name: Build App with PyInstaller
+        env: { OS: "linux", TARGET: "app" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Tar App
+        run: tar -czf WorkBuddy-Gateway-linux-x64-app.tar.gz -C dist ApiTransmitter
+      # ---- 2) 无头网关 ----
+      - name: Build gateway with PyInstaller
+        env: { OS: "linux", TARGET: "gateway" }
         run: pyinstaller packaging/gateway.spec --noconfirm
       - name: Bundle install.sh + systemd unit + tar.gz
         run: |
-          cp packaging/linux/install.sh packaging/linux/workbuddy-gateway.service dist/gateway/
+          cp packaging/linux/install.sh packaging/linux/api-transmitter.service dist/gateway/
           chmod +x dist/gateway/install.sh
           tar -czf gateway-linux-x64.tar.gz -C dist gateway
       - name: Upload artifacts
@@ -185,7 +258,9 @@ jobs:
         with:
           name: linux
           if-no-files-found: error
-          path: gateway-linux-x64.tar.gz
+          path: |
+            WorkBuddy-Gateway-linux-x64-app.tar.gz
+            gateway-linux-x64.tar.gz
 
   # ============ 汇总发布(仅 tag) ============
   release:
@@ -206,7 +281,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "WorkBuddy Gateway ${{ env.VERSION }}"
+          name: "API Transmitter ${{ env.VERSION }}"
           generate_release_notes: true
           fail_on_unmatched_files: false
           files: dist/*
