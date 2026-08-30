@@ -22,7 +22,7 @@ from typing import Any, Optional
 
 import httpx
 
-from references.codebuddy2api.accounts import CredentialManager
+from codebuddy2api.accounts import CredentialManager
 
 # global 账号真实探测出的可用模型(2026-08-29);credits 置空表示**定价未知**。
 # 注意:国际站(workbuddy.ai)的模型目录接口当前 500 取不到权威 credits 倍率,

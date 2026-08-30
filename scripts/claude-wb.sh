@@ -19,7 +19,7 @@ KEY="${WB_API_KEY:-workbuddy}"
 # 健康检查,给出友好提示
 if ! curl -s -m 2 "$BASE/health" >/dev/null 2>&1; then
   echo "⚠️  网关未运行( $BASE )。先启动:" >&2
-  echo "    $ROOT/.venv/bin/python $ROOT/converter.py --desensitize --log $ROOT/gateway.log" >&2
+  echo "    PYTHONPATH=$ROOT/src $ROOT/.venv/bin/python -m codebuddy2api.converter --desensitize --log $ROOT/gateway.log" >&2
   exit 1
 fi
 

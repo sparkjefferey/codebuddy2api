@@ -36,10 +36,15 @@ cat > "$PLIST" <<EOF
 <plist version="1.0">
 <dict>
   <key>Label</key><string>$LABEL</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key><string>$ROOT/src</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
     <string>$PYBIN</string>
-    <string>$ROOT/converter.py</string>
+    <string>-m</string>
+    <string>codebuddy2api.converter</string>
     <string>--desensitize</string>
     <string>--skip-check</string>
     <string>--log</string>

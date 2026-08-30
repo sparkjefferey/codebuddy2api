@@ -13,7 +13,7 @@ import time
 
 import httpx
 
-from references.codebuddy2api.accounts import CredentialManager
+from codebuddy2api.accounts import CredentialManager
 
 PRODUCT_CODE = "p_tcaca"
 

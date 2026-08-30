@@ -17,7 +17,7 @@ services:
       # 本地 API Key(可选)
       # - WORKBUDDY2API_KEY=
     command: >
-      python3 converter.py
+      python3 -m codebuddy2api.converter
       --host 0.0.0.0
       --port 8787
       --skip-check

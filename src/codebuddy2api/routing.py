@@ -16,8 +16,8 @@ routing.py — 请求→账号 路由与故障切换链。
 
 from __future__ import annotations
 
-from references.codebuddy2api.accounts import AccountPool
-from references.codebuddy2api.models_catalog import ModelCatalog
+from codebuddy2api.accounts import AccountPool
+from codebuddy2api.models_catalog import ModelCatalog
 
 GLOBAL_PREFIXES = ("global/", "g:", "wb-global/")
 SPECIAL_MODELS = {"auto", "default"}

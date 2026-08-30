@@ -40,7 +40,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # 或: uv v
 ## 快速开始
 
 ```bash
-.venv/bin/python converter.py --desensitize --log gateway.log
+# 从仓库根目录运行(src/ 下的 codebuddy2api 包)
+PYTHONPATH=src .venv/bin/python -m codebuddy2api.converter --desensitize --log gateway.log
 ```
 
 `GET /health`、`GET /v1/models` 通了即OK。启动时会自动扫描 `*.info`,多个登录态并入账号池。
@@ -160,8 +161,9 @@ curl ... -H "X-WB-Account: global" -d '{"model":"glm-5.2","messages":[...]}'
 ## 测试
 
 ```bash
+# 单元测试为开发辅助,未随仓库发布;如本地保留,从仓库根运行:
 for t in test_accounts test_routing test_billing test_responses_adapter test_anthropic_adapter; do
-  python3 $t.py          # 或 .venv/bin/python $t.py
+  PYTHONPATH=src .venv/bin/python $t.py
 done
 ```
 
@@ -181,6 +183,8 @@ done
 - **被"敏感内容"拦截**:开 `--desensitize --log`,看日志排查触发词。
 
 ## 模块一览
+
+模块均位于 `src/codebuddy2api/`:
 
 | 文件 | 职责 |
 |---|---|

@@ -35,28 +35,28 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, HTMLResponse
 import uvicorn
 
-from references.codebuddy2api.accounts import (AccountPool, CredentialManager, find_auth_files,
+from codebuddy2api.accounts import (AccountPool, CredentialManager, find_auth_files,
                       default_auth_dirs, BACKEND_CN, BACKEND_GLOBAL)
-from references.codebuddy2api.models_catalog import ModelCatalog, CN_FALLBACK_MODELS
-from references.codebuddy2api.routing import split_alias, candidate_chain
-from references.codebuddy2api.billing import query_credits, daily_checkin
-import references.codebuddy2api.config as config_mod
-import references.codebuddy2api.ccswitch as ccswitch
+from codebuddy2api.models_catalog import ModelCatalog, CN_FALLBACK_MODELS
+from codebuddy2api.routing import split_alias, candidate_chain
+from codebuddy2api.billing import query_credits, daily_checkin
+import codebuddy2api.config as config_mod
+import codebuddy2api.ccswitch as ccswitch
 
 try:
-    from references.codebuddy2api.desensitize import desensitize_body
+    from codebuddy2api.desensitize import desensitize_body
 except ImportError:  # 模块缺失时降级为不脱敏
     def desensitize_body(body, roles=("system",), desensitize_harness_user=False,
                          desensitize_tools=False, compact_harness=False,
                          strip_tool_metadata=False):
         return body
 
-from references.codebuddy2api.responses_adapter import (
+from codebuddy2api.responses_adapter import (
     responses_request_to_chat,
     ResponsesStreamConverter,
 )
-from references.codebuddy2api.responses_projection import project_responses_chat_body
-from references.codebuddy2api.anthropic_adapter import (
+from codebuddy2api.responses_projection import project_responses_chat_body
+from codebuddy2api.anthropic_adapter import (
     anthropic_request_to_chat,
     AnthropicStreamConverter,
 )
@@ -439,7 +439,7 @@ def _catalog_worker():
 
 @app.get("/")
 def index():
-    web = Path(__file__).parent / "web" / "index.html"
+    web = Path(__file__).resolve().parents[2] / "web" / "index.html"
     if web.is_file():
         return FileResponse(web, media_type="text/html")
     return HTMLResponse(
