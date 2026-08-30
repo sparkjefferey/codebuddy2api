@@ -437,9 +437,27 @@ def _catalog_worker():
 # 管理端点
 # ---------------------------------------------------------------------------
 
+def _resource_root() -> Path:
+    """Web 前端资源根目录。PyInstaller 冻结时数据落在 sys._MEIPASS(_internal);
+    源码树运行时用仓库根(src/../)。"""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parents[2]
+
+
+def _bundle_version() -> str:
+    """构建时若随包写入 VERSION(= tag 版本号)则上报,否则 GitHub ref 或 dev。"""
+    vf = _resource_root() / "VERSION"
+    if vf.is_file():
+        v = vf.read_text().strip()
+        return v or "dev"
+    return os.environ.get("GITHUB_REF_NAME", "dev").lstrip("v")
+
+
 @app.get("/")
 def index():
-    web = Path(__file__).resolve().parents[2] / "web" / "index.html"
+    web = _resource_root() / "web" / "index.html"
     if web.is_file():
         return FileResponse(web, media_type="text/html")
     return HTMLResponse(
@@ -454,6 +472,7 @@ def health():
         "status": "ok" if (pool and pool.names()) else "degraded",
         "platform": sys.platform,
         "python": sys.version.split()[0],
+        "version": _bundle_version(),
         "mode": "direct-proxy (native function calling)",
         "config": _redacted_config(cfg()) if cfg() else None,
     }
@@ -957,6 +976,16 @@ async def register_ccswitch(request: Request,
         opened = ccswitch.open_deeplink(url)
     _log(f"CC Switch 注册: model={effective} endpoint={endpoint} url={url[:80]}… opened={opened}")
     return {"ok": True, "url": url, "opened": opened, "model": effective}
+
+
+# ---------------------------------------------------------------------------
+# 静态资源 + PWA(在所有 API 路由之后挂载,以免遮蔽 /health /v1/* /agents 等)
+# ---------------------------------------------------------------------------
+
+_web_dir = Path(__file__).resolve().parents[2] / "web"
+if _web_dir.is_dir():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=str(_web_dir), html=True), name="app")
 
 
 # ---------------------------------------------------------------------------

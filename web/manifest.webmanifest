@@ -1,0 +1,17 @@
+{
+  "name": "WorkBuddy 算力网关",
+  "short_name": "WorkBuddy",
+  "description": "WorkBuddy 算力转接网关控制台：账号 / 模型 / 积分 / 连通测试",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e1116",
+  "theme_color": "#2f6feb",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "categories": ["developer", "productivity", "utilities"]
+}

@@ -134,10 +134,28 @@ claude
 
 **Cherry Studio / ZCode 等** —— base_url=`http://127.0.0.1:8787/v1`,模型名填网关支持的模型(如 `glm-5.2` / `global/glm-5.2`)。
 
+## 作为 App 使用(PWA + 各系统一键启停)
+
+控制台是**可安装的 PWA**:在浏览器打开 `http://127.0.0.1:8787/` 后,任意系统都能"安装为应用",
+像原生 App 一样有独立窗口/图标启动(离线也有壳)。
+
+| 系统 | 安装为 App | 网关一键启停 / 开机自启 |
+|---|---|---|
+| **macOS** | Safari/Chrome → 分享/菜单 →「添加到程序坞/安装应用」 | `scripts/install-launchagent.sh [install\|start\|stop\|status\|uninstall]` |
+| **Windows** | Edge/Chrome → 地址栏右侧「安装此站点/应用」 | `scripts/install-windows.bat`、`scripts/windows-stop.bat` |
+| **Linux** | Chromium → 菜单 →「安装应用」 | `scripts/install-linux.sh [install\|start\|stop\|restart\|status\|uninstall]` |
+| 移动端 | 浏览器 →「添加到主屏幕」 | (控制台远程连到主机网关即可) |
+
+> 说明:PWA 是**控制台界面**;网关本体(`codebuddy2api.converter`)需常驻运行,由上面各系统的脚本/自启保证。
+> 图标由 `scripts/gen-icons.py` 生成(需 Pillow),已随仓库提交在 `web/icons/`。
+
 ### macOS 开机自启(可选)
 
 ```bash
 ./scripts/install-launchagent.sh            # 安装并启动
+./scripts/install-launchagent.sh start      # 启动
+./scripts/install-launchagent.sh stop       # 停止(保留配置)
+./scripts/install-launchagent.sh status     # 状态
 ./scripts/install-launchagent.sh uninstall  # 卸载
 ```
 
@@ -168,6 +186,26 @@ done
 ```
 
 `test_accounts/routing/billing` 不访问网络;协议层测试用模拟 SSE。
+
+## 自动发布(打包 / 发行)
+
+打 `vX.Y.Z` 的 git tag,CI(`.github/workflows/release.yml`)自动用 **PyInstaller** 构建多平台包并挂到 GitHub Release,免用户在目标机装 Python/依赖:
+
+| 平台 | 产物 |
+|---|---|
+| macOS arm64 / x86_64 | `.dmg`(.app,**签名+公证** when certs configured;内含 `Contents/Resources/launchagent-first-run.sh` 一键注册 launchd 自启)+ 绿色便携 `.zip` |
+| Windows x64 | 便携 `gateway-win-x64.zip`(含 `install.bat` 一键注册登录自启) |
+| Linux x86_64 | `gateway-linux-x64.tar.gz`(含 `install.sh` 注册用户级 systemd) |
+
+```bash
+git tag v0.2.0 && git push origin --tags    # 触发发布
+```
+
+- 前端 `web/index.html` 由 spec 打进 bundle;唯一的源码改动是 `converter.py` 的 `_resource_root()`(PyInstaller 冻结时从 `sys._MEIPASS` 解析资源)。
+- `launchagent-first-run.sh` / `install.bat` / `install.sh` 分别做 macOS / Windows / Linux 的“一键自启”。macOS 免签名时用「右键 → 打开」绕过 Gatekeeper;Windows 未签名会有 SmartScreen 提示(更多信息 → 仍要运行)。
+- 本地快速出包调试: `./scripts/build-release-local.sh`(不签名/公证,产出 `dist/` 冒烟)。
+- CI 用到的签名/公证 secrets 见 workflow 内注释;未配置时仍能出未公证包(Gatekeeper 右键打开)。
+- 版本号取自 tag(`VERSION` 注入 bundle,`/health` 上报)。`*.info` 登录态在你的本机,不随包、不进 CI。
 
 ## 与脱敏相关
 

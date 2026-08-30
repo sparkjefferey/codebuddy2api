@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2f6feb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="WorkBuddy">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <title>WorkBuddy 算力网关 · 控制台</title>
 <style>
   :root{
@@ -428,6 +436,12 @@ function saveSettings(){BASE=$("set_base").value.trim().replace(/\/+$/,"");API_K
 
 loadSettings();
 refreshAll();
+
+/* ---------- PWA: 注册 Service Worker(仅同源,用于安装为应用/离线壳) ---------- */
+if ('serviceWorker' in navigator) {
+  try { navigator.serviceWorker.register('/sw.js'); }
+  catch (e) { console.warn('SW 注册失败', e); }
+}
 </script>
 </body>
 </html>

@@ -1,0 +1,204 @@
+name: build-release
+
+# 打 vX.Y.Z tag 自动构建多平台安装包/便携包并发布 GitHub Release。
+# workflow_dispatch 可在分支上手动跑以先验证构建(不建 Release)。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "测试用版本号(去掉 v)，如 0.2.0；留空用 git describe"
+        required: false
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ============ macOS arm64 (Apple Silicon) ============
+  mac-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+      - name: Resolve version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "$V" > VERSION
+      - name: Build with PyInstaller
+        env: { OS: "mac" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Sign + notarize + dmg
+        env:
+          MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
+          MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
+          MACOS_CERT_PASSWORD: "${{ secrets.MACOS_CERT_PASSWORD }}"
+          APPLE_NOTARIZE_API_KEY: "${{ secrets.APPLE_NOTARIZE_API_KEY }}"
+          APPLE_NOTARIZE_API_KEY_ID: "${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}"
+          APPLE_NOTARIZE_TEAM_ID: "${{ secrets.APPLE_NOTARIZE_TEAM_ID }}"
+        run: |
+          chmod +x packaging/macos/notarize.sh
+          ./packaging/macos/notarize.sh gateway-mac-arm64.dmg
+      - name: Portable zip (green)
+        run: |
+          cp packaging/macos/launchagent-first-run.sh dist/gateway/
+          ditto -c -k --sequesterRsrc --keepParent dist/gateway gateway-mac-arm64-portable.zip
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-arm64
+          if-no-files-found: error
+          path: |
+            gateway-mac-arm64.dmg
+            gateway-mac-arm64-portable.zip
+
+  # ============ macOS x86_64 (Intel) ============
+  mac-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+      - name: Resolve version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "$V" > VERSION
+      - name: Build with PyInstaller
+        env: { OS: "mac" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Sign + notarize + dmg
+        env:
+          MACOS_DEV_ID_CERT: "${{ secrets.DEV_ID }}"
+          MACOS_CERT_P12: "${{ secrets.MACOS_CERT_P12 }}"
+          MACOS_CERT_PASSWORD: "${{ secrets.MACOS_CERT_PASSWORD }}"
+          APPLE_NOTARIZE_API_KEY: "${{ secrets.APPLE_NOTARIZE_API_KEY }}"
+          APPLE_NOTARIZE_API_KEY_ID: "${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}"
+          APPLE_NOTARIZE_TEAM_ID: "${{ secrets.APPLE_NOTARIZE_TEAM_ID }}"
+        run: |
+          chmod +x packaging/macos/notarize.sh
+          ./packaging/macos/notarize.sh gateway-mac-x86_64.dmg
+      - name: Portable zip (green)
+        run: |
+          cp packaging/macos/launchagent-first-run.sh dist/gateway/
+          ditto -c -k --sequesterRsrc --keepParent dist/gateway gateway-mac-x86_64-portable.zip
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-x86_64
+          if-no-files-found: error
+          path: |
+            gateway-mac-x86_64.dmg
+            gateway-mac-x86_64-portable.zip
+
+  # ============ Windows x64 ============
+  windows:
+    runs-on: windows-latest
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+      - name: Resolve version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "$V" > VERSION
+      - name: Build with PyInstaller
+        env: { OS: "win" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Bundle installer bat + zip
+        run: |
+          cp packaging/windows/install.bat dist/gateway/
+          cd dist && tar -a -c -f ../gateway-win-x64.zip gateway
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: gateway-win-x64.zip
+
+  # ============ Linux x86_64 ============
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pyinstaller-hooks-contrib
+      - name: Resolve version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            V="${inputs.tag:-$(git describe --tags --always 2>/dev/null || echo 0.0.0)}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "$V" > VERSION
+      - name: Build with PyInstaller
+        env: { OS: "linux" }
+        run: pyinstaller packaging/gateway.spec --noconfirm
+      - name: Bundle install.sh + systemd unit + tar.gz
+        run: |
+          cp packaging/linux/install.sh packaging/linux/workbuddy-gateway.service dist/gateway/
+          chmod +x dist/gateway/install.sh
+          tar -czf gateway-linux-x64.tar.gz -C dist gateway
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          if-no-files-found: error
+          path: gateway-linux-x64.tar.gz
+
+  # ============ 汇总发布(仅 tag) ============
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [mac-arm64, mac-x86_64, windows, linux]
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "WorkBuddy Gateway ${{ env.VERSION }}"
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: dist/*

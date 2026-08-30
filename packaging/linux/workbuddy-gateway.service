@@ -1,0 +1,15 @@
+[Unit]
+Description=WorkBuddy Gateway (OpenAI/Anthropic/Responses 本地网关)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/opt/workbuddy-gateway
+ExecStart=%h/.local/opt/workbuddy-gateway/gateway --desensitize --skip-check --log %h/.local/opt/workbuddy-gateway/gateway.log
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:%h/.local/opt/workbuddy-gateway/gateway.log
+StandardError=append:%h/.local/opt/workbuddy-gateway/gateway.log
+
+[Install]
+WantedBy=default.target

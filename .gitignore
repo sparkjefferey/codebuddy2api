@@ -29,3 +29,13 @@ config.json
 
 # 测试（暂不公开）
 test_*.py
+
+# 打包产物（本地 build-release-local.sh 生成，CI 在干净 runner 上重建）
+build/
+dist/
+VERSION
+*.dmg
+*.p8
+*.keychain-db
+gateway-win-x64.zip
+gateway-linux-x64.tar.gz
