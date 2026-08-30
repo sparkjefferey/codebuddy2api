@@ -289,7 +289,7 @@ function renderAgents(){
       <div class="test" id="ts-${id}"></div>`;
     card.querySelector(`[data-on="${id}"]`).onchange=e=>{AGENTS[id].enabled=e.target.checked;scheduleSave();};
     card.querySelector(`[data-acc="${id}"]`).onchange=e=>{AGENTS[id].account=e.target.value;const o=modelsForAccount(e.target.value);if(o.length&&!o.some(x=>x.id===AGENTS[id].model||x.plain===AGENTS[id].model))AGENTS[id].model=o[0].plain||o[0].id;scheduleSave();renderAgents();};
-    card.querySelector(`[data-model="${id}"]`).onchange=e=>{AGENTS[id].model=e.target.value;scheduleSave();};
+    card.querySelector(`[data-model="${id}"]`).onchange=e=>{AGENTS[id].model=e.target.value;scheduleSave();renderAgents();};
     card.querySelector("#snip-"+id).setAttribute("readonly","");
     box.appendChild(card);
   }

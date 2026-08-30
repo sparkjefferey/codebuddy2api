@@ -82,7 +82,7 @@ case "$CMD" in
     ;;
   status)
     if loaded; then
-      local pid; pid=$(launchctl list | awk -v K="$LABEL" '$NF==K{print $1}')
+      pid=$(launchctl list | awk -v K="$LABEL" '$NF==K{print $1}')
       log "● $LABEL 运行中 (pid=$pid)"
     else
       [ -f "$PLIST" ] && log "○ $LABEL 已安装,未运行(start 启动)" || log "○ $LABEL 未安装(install 安装)"
