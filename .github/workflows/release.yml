@@ -64,17 +64,31 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
+      - name: Setup macOS signing env (only when secrets present)
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          DEV_ID: ${{ secrets.DEV_ID }}
+          APPLE_NOTARIZE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}
+          APPLE_NOTARIZE_API_KEY: ${{ secrets.APPLE_NOTARIZE_API_KEY }}
+          APPLE_NOTARIZE_TEAM_ID: ${{ secrets.APPLE_NOTARIZE_TEAM_ID }}
+        run: |
+          # tauri-cli 会把空字符串的 APPLE_CERTIFICATE 当作已配置并尝试导入证书，
+          # 因此只在 secret 非空时注入签名变量，否则产出未签名包
+          if [ -n "$MACOS_CERT_P12" ]; then
+            echo "APPLE_CERTIFICATE=$MACOS_CERT_P12" >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$MACOS_CERT_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$DEV_ID" >> "$GITHUB_ENV"
+            echo "APPLE_ID=$APPLE_NOTARIZE_API_KEY_ID" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=$APPLE_NOTARIZE_API_KEY" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$APPLE_NOTARIZE_TEAM_ID" >> "$GITHUB_ENV"
+          else
+            echo "未配置签名 secrets，产出未签名包"
+          fi
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 签名/公证(可选,缺少 secrets 时产出未签名包)
-          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERT_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.DEV_ID }}
-          APPLE_ID: ${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_NOTARIZE_API_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_NOTARIZE_TEAM_ID }}
         with:
           projectPath: src-tauri
           args: --target aarch64-apple-darwin
@@ -108,16 +122,29 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run build
+      - name: Setup macOS signing env (only when secrets present)
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          DEV_ID: ${{ secrets.DEV_ID }}
+          APPLE_NOTARIZE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}
+          APPLE_NOTARIZE_API_KEY: ${{ secrets.APPLE_NOTARIZE_API_KEY }}
+          APPLE_NOTARIZE_TEAM_ID: ${{ secrets.APPLE_NOTARIZE_TEAM_ID }}
+        run: |
+          if [ -n "$MACOS_CERT_P12" ]; then
+            echo "APPLE_CERTIFICATE=$MACOS_CERT_P12" >> "$GITHUB_ENV"
+            echo "APPLE_CERTIFICATE_PASSWORD=$MACOS_CERT_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_SIGNING_IDENTITY=$DEV_ID" >> "$GITHUB_ENV"
+            echo "APPLE_ID=$APPLE_NOTARIZE_API_KEY_ID" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=$APPLE_NOTARIZE_API_KEY" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$APPLE_NOTARIZE_TEAM_ID" >> "$GITHUB_ENV"
+          else
+            echo "未配置签名 secrets，产出未签名包"
+          fi
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERT_P12 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.DEV_ID }}
-          APPLE_ID: ${{ secrets.APPLE_NOTARIZE_API_KEY_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_NOTARIZE_API_KEY }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_NOTARIZE_TEAM_ID }}
         with:
           projectPath: src-tauri
           args: --target x86_64-apple-darwin
