@@ -216,9 +216,11 @@ jobs:
           name: "BuddyAIGateway ${{ github.ref_name }}"
           generate_release_notes: true
           fail_on_unmatched_files: false
+          # 产物下载后按平台子目录展开（msi/nsis/dmg/macos/deb/appimage），
+          # 必须用 ** 递归匹配，只查一层会静默发布空 Release
           files: |
-            dist/*.msi
-            dist/*.exe
-            dist/*.dmg
-            dist/*.deb
-            dist/*.AppImage
+            dist/**/*.msi
+            dist/**/*.exe
+            dist/**/*.dmg
+            dist/**/*.deb
+            dist/**/*.AppImage
