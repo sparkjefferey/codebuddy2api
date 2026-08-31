@@ -85,7 +85,7 @@ impl AppConfig {
         &self.api_key
     }
 
-    /// Redacted view for /health — masks api_key.
+    /// Redacted view for /health and get_config — never expose tokens.
     pub fn redacted(&self) -> serde_json::Value {
         let mut v = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
         if let Some(obj) = v.as_object_mut() {
@@ -96,8 +96,58 @@ impl AppConfig {
                     serde_json::Value::String(if has_key { "".into() } else { "**".into() }),
                 );
             }
+            // credential 只输出摘要字段，access/refresh token 绝不外泄
+            obj.insert(
+                "credential".to_string(),
+                match self.credential.as_ref() {
+                    Some(c) => serde_json::json!({
+                        "uid": c.uid,
+                        "nickname": c.nickname,
+                        "domain": c.domain,
+                        "expires_at": c.expires_at,
+                    }),
+                    None => serde_json::Value::Null,
+                },
+            );
         }
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacted_hides_tokens() {
+        let cfg = AppConfig {
+            api_key: "sk-buddy-x".into(),
+            credential: Some(CredentialData {
+                access_token: "eyJ-very-long-secret-token".into(),
+                refresh_token: "rt-secret".into(),
+                expires_at: 123,
+                domain: "d".into(),
+                uid: "u1".into(),
+                enterprise_id: "e1".into(),
+                nickname: "n1".into(),
+            }),
+            desensitize: false,
+            model_sync_interval_hours: 24,
+        };
+        let v = cfg.redacted();
+        let s = serde_json::to_string(&v).unwrap();
+        assert!(!s.contains("eyJ-very-long-secret-token"), "access_token 泄漏");
+        assert!(!s.contains("rt-secret"), "refresh_token 泄漏");
+        assert_eq!(v["api_key"], "**");
+        assert_eq!(v["credential"]["uid"], "u1");
+        assert!(v["credential"].get("access_token").is_none());
+    }
+
+    #[test]
+    fn redacted_without_credential() {
+        let cfg = AppConfig::default();
+        let v = cfg.redacted();
+        assert!(v["credential"].is_null());
     }
 }
 

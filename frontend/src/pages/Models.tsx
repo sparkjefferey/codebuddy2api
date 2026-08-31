@@ -45,7 +45,7 @@ export default function Models() {
   } as const;
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
+    <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>模型目录</h2>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <input

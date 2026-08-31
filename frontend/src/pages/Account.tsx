@@ -52,7 +52,7 @@ export default function Account() {
   } as const;
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>账号</h2>
 
       <div style={cardStyle}>

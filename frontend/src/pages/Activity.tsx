@@ -17,7 +17,7 @@ export default function Activity() {
   }, []);
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>活动</h2>
       <div style={{
         background: "var(--bg-panel)", border: "1px solid var(--line)",

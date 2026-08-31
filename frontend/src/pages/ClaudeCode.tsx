@@ -4,10 +4,18 @@ import { buildCcswitchLink, getApiKey, openCcswitchLink, GATEWAY } from "../lib/
 export default function ClaudeCode() {
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("hy3");
+  const [models, setModels] = useState<string[]>([]);
   const [link, setLink] = useState("");
 
   useEffect(() => {
-    getApiKey().then(setApiKey).catch(() => {});
+    getApiKey()
+      .then((key) => {
+        setApiKey(key);
+        return fetch(`${GATEWAY}/v1/models`, { headers: { "X-Api-Key": key } })
+          .then((r) => r.json())
+          .then((d) => setModels(((d?.data ?? []) as { id: string }[]).map((m) => m.id)));
+      })
+      .catch(() => {});
   }, []);
 
   async function makeLink(launch: boolean) {
@@ -48,7 +56,7 @@ export default function ClaudeCode() {
   } as const;
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>Claude Code 接入</h2>
 
       <div style={cardStyle}>
@@ -59,16 +67,33 @@ export default function ClaudeCode() {
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ fontSize: 13, color: "var(--text-mid)" }}>
             默认模型
-            <input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              style={{
-                marginLeft: 8, width: 140, padding: "6px 10px",
-                background: "var(--bg-base)", border: "1px solid var(--line)",
-                borderRadius: "var(--radius-sm)", color: "var(--text-hi)", fontSize: 12.5,
-                fontFamily: "var(--font-mono)",
-              }}
-            />
+            {models.length > 0 ? (
+              <select
+                value={models.includes(model) ? model : models[0]}
+                onChange={(e) => setModel(e.target.value)}
+                style={{
+                  marginLeft: 8, width: 180, padding: "6px 10px",
+                  background: "var(--bg-base)", border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-sm)", color: "var(--text-hi)", fontSize: 12.5,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                style={{
+                  marginLeft: 8, width: 140, padding: "6px 10px",
+                  background: "var(--bg-base)", border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-sm)", color: "var(--text-hi)", fontSize: 12.5,
+                  fontFamily: "var(--font-mono)",
+                }}
+              />
+            )}
           </label>
           <button onClick={() => makeLink(true)} style={btnPrimary}>注册到 CC Switch</button>
           <button onClick={() => makeLink(false)} style={btnGhost}>仅生成链接</button>

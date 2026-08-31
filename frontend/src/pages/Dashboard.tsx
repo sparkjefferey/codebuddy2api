@@ -37,9 +37,9 @@ export default function Dashboard() {
   } as const;
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>总览</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: 14 }}>
         <div style={cardStyle}>
           <div style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 6 }}>网关状态</div>
           <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "var(--font-mono)" }}>
@@ -75,6 +75,7 @@ export default function Dashboard() {
         <div style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 8 }}>健康详情</div>
         <pre style={{
           margin: 0, fontSize: 12, color: "var(--text-mid)", overflow: "auto",
+          maxWidth: "100%", minWidth: 0,
           fontFamily: "var(--font-mono)",
         }}>
           {health ? JSON.stringify(health, null, 2) : "等待响应…"}

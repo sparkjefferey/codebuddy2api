@@ -52,8 +52,11 @@ pub fn open_deeplink(url: &str) -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", url])
+        // 不能走 `cmd /c start`：URL 里的 `&` 会被 cmd 当命令分隔符截断，
+        // 导致 CC Switch 只收到 `resource=provider` 而报 Missing 'app' parameter。
+        // rundll32 直接接收完整参数，不经过 shell 解析。
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

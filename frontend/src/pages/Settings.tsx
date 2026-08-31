@@ -30,7 +30,7 @@ export default function Settings() {
   } as const;
 
   return (
-    <div style={{ display: "grid", gap: 16 }}>
+    <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
       <h2 style={{ margin: 0 }}>设置</h2>
 
       <div style={cardStyle}>
@@ -102,6 +102,7 @@ export default function Settings() {
         <pre style={{
           margin: "10px 0 0", fontSize: 11.5, color: "var(--text-dim)",
           fontFamily: "var(--font-mono)", whiteSpace: "pre-wrap",
+          maxWidth: "100%", minWidth: 0, overflow: "auto",
         }}>
           {JSON.stringify(config, null, 2)}
         </pre>
