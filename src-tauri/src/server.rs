@@ -1,4 +1,4 @@
-//! Axum HTTP gateway — mirrors converter.py routes, single CN account.
+//! Axum HTTP gateway — CN 多账号轮询负载均衡 + 连续 429 自动切换。
 use axum::{
     body::Body,
     extract::State,
@@ -15,27 +15,43 @@ use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 use crate::anthropic::{anthropic_to_chat, AnthropicStreamConverter};
 use crate::billing;
 use crate::catalog::ModelCatalog;
-use crate::config::AppConfig;
-use crate::credential::{validate_import, CredentialManager};
+use crate::config::{AccountEntry, AppConfig, CredentialData};
+use crate::credential;
 use crate::ccswitch;
 use crate::desensitize;
+use crate::pool::{AccountPool, AccountState};
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
-    pub credential: CredentialManager,
+    pub pool: AccountPool,
     pub catalog: Arc<ModelCatalog>,
 }
 
 impl AppState {
     pub fn new(config: AppConfig) -> Self {
-        let cred_data = config.credential.clone();
         Self {
             config: Arc::new(RwLock::new(config)),
-            credential: CredentialManager::new(cred_data),
+            pool: AccountPool::default(),
             catalog: Arc::new(ModelCatalog::default()),
         }
     }
+}
+
+/// 单账号对外摘要（含运行态），/health 与前端共用。
+pub fn account_json(a: &AccountEntry, st: Option<&AccountState>) -> serde_json::Value {
+    serde_json::json!({
+        "id": a.id,
+        "uid": a.credential.uid,
+        "nickname": a.credential.nickname,
+        "domain": a.credential.domain,
+        "expires_at": a.credential.expires_at,
+        "enabled": a.enabled,
+        "consecutive_429": st.map(|s| s.consecutive_429).unwrap_or(0),
+        "cooldown_until": st.map(|s| s.cooldown_until_ms).unwrap_or(0),
+        "last_error": st.and_then(|s| s.last_error.clone()),
+        "last_used_ms": st.and_then(|s| s.last_used_ms),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -85,26 +101,236 @@ fn require_auth(state: &AppState, headers: &HeaderMap) -> Option<Response> {
 }
 
 // ---------------------------------------------------------------------------
+// Account helpers
+// ---------------------------------------------------------------------------
+
+/// 读取指定账号凭据，临期自动刷新并落盘。
+pub async fn fresh_credential(state: &AppState, id: &str) -> Result<CredentialData, String> {
+    let cred = {
+        let cfg = state.config.read().await;
+        cfg.accounts
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.credential.clone())
+            .ok_or_else(|| "账号不存在".to_string())?
+    };
+    if !credential::is_expired(&cred) {
+        return Ok(cred);
+    }
+    let updated = credential::refresh(&cred).await?;
+    persist_credential(state, id, updated.clone()).await;
+    Ok(updated)
+}
+
+/// 将刷新后的凭据写回配置并落盘。
+async fn persist_credential(state: &AppState, id: &str, updated: CredentialData) {
+    let mut cfg = state.config.write().await;
+    if let Some(a) = cfg.accounts.iter_mut().find(|a| a.id == id) {
+        a.credential = updated;
+        let _ = cfg.save();
+    }
+}
+
+/// 对单个账号发起一次上游 chat 请求。
+async fn send_for_account(
+    cred: &CredentialData,
+    chat_body: &serde_json::Value,
+    timeout_secs: u64,
+) -> Result<reqwest::Response, String> {
+    let hdrs = credential::build_headers(cred);
+    let base = credential::backend_base(cred);
+    let url = format!("{base}/v2/chat/completions");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.post(&url).json(chat_body);
+    for (k, v) in &hdrs {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    req.send().await.map_err(|e| e.to_string())
+}
+
+/// 多账号故障转移调度。
+///
+/// 轮询选号 → 401/403 先强制刷新重试一次 → 429 计数冷却并换号 →
+/// 5xx/408/网络错误换号 → 其余 4xx 视为请求问题直接透传。
+/// 仅在流开始前重试；一旦上游 200 即返回响应交给调用方流式转发。
+async fn dispatch(
+    state: &AppState,
+    chat_body: &serde_json::Value,
+    timeout_secs: u64,
+) -> Result<reqwest::Response, Response> {
+    let (candidates, total_enabled) = {
+        let cfg = state.config.read().await;
+        let ids: Vec<String> = cfg
+            .accounts
+            .iter()
+            .filter(|a| a.enabled)
+            .map(|a| a.id.clone())
+            .collect();
+        let enabled_n = ids.len();
+        let order = state.pool.order_candidates(&ids);
+        let candidates: Vec<(String, CredentialData)> = order
+            .into_iter()
+            .filter_map(|id| {
+                cfg.accounts
+                    .iter()
+                    .find(|a| a.id == id)
+                    .map(|a| (a.id.clone(), a.credential.clone()))
+            })
+            .collect();
+        (candidates, enabled_n)
+    };
+
+    if candidates.is_empty() {
+        let (msg, err_type) = if total_enabled == 0 {
+            (
+                "未配置可用账号，请先在「账号」页导入凭据",
+                "auth_error",
+            )
+        } else {
+            (
+                "所有账号均处于 429 限流冷却中，请稍后重试",
+                "rate_limit_error",
+            )
+        };
+        return Err(
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": {"message": msg, "type": err_type}})),
+            )
+                .into_response(),
+        );
+    }
+
+    let mut last_err = String::new();
+    let mut saw_429 = false;
+    for (id, _) in &candidates {
+        let mut cred = match fresh_credential(state, id).await {
+            Ok(c) => c,
+            Err(e) => {
+                let m = format!("token 刷新失败: {e}");
+                state.pool.on_error(id, &m);
+                last_err = format!("账号 {id}: {m}");
+                continue;
+            }
+        };
+        let mut force_refresh = false;
+        loop {
+            if force_refresh {
+                // 401/403：token 可能被吊销，强制刷新后重试同一账号一次
+                match credential::refresh(&cred).await {
+                    Ok(updated) => {
+                        persist_credential(state, id, updated.clone()).await;
+                        cred = updated;
+                    }
+                    Err(e) => {
+                        let m = format!("token 强制刷新失败: {e}");
+                        state.pool.on_error(id, &m);
+                        last_err = format!("账号 {id}: {m}");
+                        break;
+                    }
+                }
+            }
+            match send_for_account(&cred, chat_body, timeout_secs).await {
+                Err(net) => {
+                    let m = format!("网络错误: {net}");
+                    state.pool.on_error(id, &m);
+                    last_err = format!("账号 {id}: {m}");
+                    break;
+                }
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    if status == 200 {
+                        state.pool.on_success(id);
+                        return Ok(resp);
+                    }
+                    if status == 429 {
+                        if let Some(secs) = state.pool.on_429(id) {
+                            eprintln!("[pool] 账号 {id} 连续 429，冷却 {secs}s");
+                        } else {
+                            eprintln!("[pool] 账号 {id} 上游 429，切换下一账号");
+                        }
+                        saw_429 = true;
+                        last_err = format!("账号 {id}: 上游限流(429)");
+                        break;
+                    }
+                    if (status == 401 || status == 403) && !force_refresh {
+                        force_refresh = true;
+                        continue;
+                    }
+                    if status == 408 || status >= 500 {
+                        let m = format!("上游 {status}");
+                        state.pool.on_error(id, &m);
+                        last_err = format!("账号 {id}: {m}");
+                        break;
+                    }
+                    // 其它 4xx：请求本身的问题，换账号无意义 → 直接透传
+                    let m = format!("上游 {status}");
+                    state.pool.on_error(id, &m);
+                    let text = resp.text().await.unwrap_or_default();
+                    let err_body: serde_json::Value = serde_json::from_str(&text).unwrap_or(
+                        serde_json::json!({
+                            "error": {
+                                "message": text.chars().take(500).collect::<String>(),
+                                "type": "upstream_error",
+                                "code": status,
+                            }
+                        }),
+                    );
+                    return Err(
+                        (
+                            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+                            Json(err_body),
+                        )
+                            .into_response(),
+                    );
+                }
+            }
+        }
+    }
+
+    let status = if saw_429 {
+        StatusCode::TOO_MANY_REQUESTS
+    } else {
+        StatusCode::BAD_GATEWAY
+    };
+    Err(
+        (
+            status,
+            Json(serde_json::json!({
+                "error": {
+                    "message": format!("所有可用账号均请求失败：{last_err}"),
+                    "type": if saw_429 { "rate_limit_error" } else { "api_error" },
+                }
+            })),
+        )
+            .into_response(),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
     let cfg = state.config.read().await;
-    let cred = state.credential.get().await;
-    let status = if cred.is_some() { "ok" } else { "degraded" };
-    let mut info = serde_json::json!({
+    let snap = state.pool.snapshot();
+    let enabled = cfg.accounts.iter().filter(|a| a.enabled).count();
+    let status = if enabled > 0 { "ok" } else { "degraded" };
+    let accounts: Vec<serde_json::Value> = cfg
+        .accounts
+        .iter()
+        .map(|a| account_json(a, snap.get(&a.id)))
+        .collect();
+    let info = serde_json::json!({
         "status": status,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "mode": "buddyaigateway",
+        "accounts": accounts,
         "config": cfg.redacted(),
     });
-    if let Some(c) = cred {
-        info["account"] = serde_json::json!({
-            "uid": c.uid,
-            "nickname": c.nickname,
-            "domain": c.domain,
-        });
-    }
     Json(info)
 }
 
@@ -126,18 +352,53 @@ async fn credits_handler(
     if let Some(r) = require_auth(&state, &headers) {
         return r;
     }
-    let hdrs = match state.credential.build_headers().await {
-        Some(h) => h,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error": {"message": "未配置账号", "type": "auth_error"}})),
-            )
-                .into_response()
-        }
+    let accounts: Vec<(String, String, String, CredentialData)> = {
+        let cfg = state.config.read().await;
+        cfg.accounts
+            .iter()
+            .filter(|a| a.enabled)
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    a.credential.uid.clone(),
+                    a.credential.nickname.clone(),
+                    a.credential.clone(),
+                )
+            })
+            .collect()
     };
-    let result = billing::query_credits(&hdrs).await;
-    Json(serde_json::json!({"account": result})).into_response()
+    if accounts.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": {"message": "未配置账号", "type": "auth_error"}})),
+        )
+            .into_response();
+    }
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    let mut total: i64 = 0;
+    for (id, uid, nickname, cred) in &accounts {
+        let cred = fresh_credential(&state, id)
+            .await
+            .unwrap_or_else(|_| cred.clone());
+        let hdrs = credential::build_headers(&cred);
+        let result = billing::query_credits(&hdrs).await;
+        let err = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let remain = result.get("credits_remaining").and_then(|v| v.as_i64());
+        if err.is_none() {
+            total += remain.unwrap_or(0);
+        }
+        out.push(serde_json::json!({
+            "id": id,
+            "uid": uid,
+            "nickname": nickname,
+            "credits_remaining": if err.is_none() { remain } else { None },
+            "error": err,
+        }));
+    }
+    Json(serde_json::json!({"credits_remaining": total, "accounts": out})).into_response()
 }
 
 async fn checkin_handler(
@@ -147,18 +408,47 @@ async fn checkin_handler(
     if let Some(r) = require_auth(&state, &headers) {
         return r;
     }
-    let hdrs = match state.credential.build_headers().await {
-        Some(h) => h,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error": {"message": "未配置账号", "type": "auth_error"}})),
-            )
-                .into_response()
-        }
+    let accounts: Vec<(String, String, String, CredentialData)> = {
+        let cfg = state.config.read().await;
+        cfg.accounts
+            .iter()
+            .filter(|a| a.enabled)
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    a.credential.uid.clone(),
+                    a.credential.nickname.clone(),
+                    a.credential.clone(),
+                )
+            })
+            .collect()
     };
-    let result = billing::daily_checkin(&hdrs).await;
-    Json(serde_json::json!({"account": result})).into_response()
+    if accounts.is_empty() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": {"message": "未配置账号", "type": "auth_error"}})),
+        )
+            .into_response();
+    }
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for (id, uid, nickname, cred) in &accounts {
+        let cred = fresh_credential(&state, id)
+            .await
+            .unwrap_or_else(|_| cred.clone());
+        let hdrs = credential::build_headers(&cred);
+        let result = billing::daily_checkin(&hdrs).await;
+        results.push(serde_json::json!({
+            "id": id,
+            "uid": uid,
+            "nickname": nickname,
+            "ok": result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+            "message": result.get("message").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    }
+    let all_ok = results
+        .iter()
+        .all(|r| r.get("ok").and_then(|v| v.as_bool()).unwrap_or(false));
+    Json(serde_json::json!({"ok": all_ok, "results": results})).into_response()
 }
 
 async fn models_reload_handler(
@@ -168,11 +458,16 @@ async fn models_reload_handler(
     if let Some(r) = require_auth(&state, &headers) {
         return r;
     }
-    let hdrs = state.credential.build_headers().await;
-    let catalog = state.catalog.clone();
+    let first_id = {
+        let cfg = state.config.read().await;
+        cfg.accounts.iter().find(|a| a.enabled).map(|a| a.id.clone())
+    };
+    let st = state.clone();
     tokio::spawn(async move {
-        if let Some(h) = hdrs {
-            catalog.sync(&h).await;
+        if let Some(id) = first_id {
+            if let Ok(cred) = fresh_credential(&st, &id).await {
+                st.catalog.sync(&credential::build_headers(&cred)).await;
+            }
         }
     });
     Json(serde_json::json!({"status": "reloading"})).into_response()
@@ -186,23 +481,13 @@ async fn agents_test_handler(
     if let Some(r) = require_auth(&state, &headers) {
         return r;
     }
-    let hdrs = match state.credential.build_headers().await {
-        Some(h) => h,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error": {"message": "未配置账号", "type": "auth_error"}})),
-            )
-                .into_response()
-        }
-    };
     let prompt = body
         .get("prompt")
         .and_then(|v| v.as_str())
         .unwrap_or("ping");
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("hy3");
 
-    // Quick chat via upstream
+    // Quick chat via upstream — 走多账号调度
     let chat_body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -211,36 +496,29 @@ async fn agents_test_handler(
         "stream_options": {"include_usage": true}
     });
 
-    let base = state.credential.backend_base().await;
-    let url = format!("{base}/v2/chat/completions");
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"ok": false, "error": e.to_string()})),
-            )
-                .into_response()
-        }
-    };
-    let mut req = client.post(&url).json(&chat_body);
-    for (k, v) in &hdrs {
-        req = req.header(k.as_str(), v.as_str());
-    }
-    let resp = match req.send().await {
+    let resp = match dispatch(&state, &chat_body, 30).await {
         Ok(r) => r,
-        Err(e) => {
-            return Json(serde_json::json!({"ok": false, "error": e.to_string()})).into_response()
+        Err(err_resp) => {
+            let status = err_resp.status();
+            let bytes = axum::body::to_bytes(err_resp.into_body(), 64 * 1024)
+                .await
+                .unwrap_or_default();
+            let msg = serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|v| {
+                    v.pointer("/error/message")
+                        .and_then(|m| m.as_str())
+                        .map(String::from)
+                })
+                .unwrap_or_else(|| {
+                    String::from_utf8_lossy(&bytes).chars().take(200).collect()
+                });
+            return Json(
+                serde_json::json!({"ok": false, "http": status.as_u16(), "error": msg}),
+            )
+                .into_response();
         }
     };
-    if resp.status() != reqwest::StatusCode::OK {
-        let text = resp.text().await.unwrap_or_default();
-        return Json(serde_json::json!({"ok": false, "http": 502, "error": text.chars().take(300).collect::<String>()}))
-            .into_response();
-    }
     let bytes = resp.bytes().await.unwrap_or_default();
     let text = String::from_utf8_lossy(&bytes);
     // Aggregate SSE
@@ -299,6 +577,7 @@ async fn ccswitch_register_handler(
     Json(serde_json::json!({"ok": true, "url": url, "opened": opened, "model": model})).into_response()
 }
 
+/// HTTP 导入端点：新增/更新账号（uid 相同视为更新）
 async fn config_import_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -313,13 +592,13 @@ async fn config_import_handler(
     } else {
         body.to_string()
     };
-    match validate_import(&json_str) {
+    match credential::validate_import(&json_str) {
         Ok(cred) => {
-            state.credential.set(cred.clone()).await;
             let mut cfg = state.config.write().await;
-            cfg.credential = Some(cred);
+            let action = cfg.upsert_account(cred);
             let _ = cfg.save();
-            Json(serde_json::json!({"ok": true})).into_response()
+            drop(cfg);
+            Json(serde_json::json!({"ok": true, "action": action})).into_response()
         }
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -352,35 +631,6 @@ async fn messages_handler(
         return r;
     }
 
-    let cred_data = state.credential.get().await;
-    if cred_data.is_none() {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({"error": {"message": "未配置账号，请先导入凭据", "type": "auth_error"}})),
-        )
-            .into_response();
-    }
-
-    // Ensure token fresh
-    if let Err(e) = state.credential.ensure_fresh().await {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": {"message": format!("token 刷新失败: {e}"), "type": "auth_error"}})),
-        )
-            .into_response();
-    }
-
-    let hdrs = match state.credential.build_headers().await {
-        Some(h) => h,
-        None => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({"error": {"message": "无可用凭据", "type": "auth_error"}})),
-            )
-                .into_response()
-        }
-    };
-
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("hy3").to_string();
 
     let mut chat_body = anthropic_to_chat(&body);
@@ -397,45 +647,11 @@ async fn messages_handler(
         chat_body["stream_options"] = serde_json::json!({"include_usage": true});
     }
 
-    let base = state.credential.backend_base().await;
-    let url = format!("{base}/v2/chat/completions");
-
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": {"message": e.to_string(), "type": "api_error"}})),
-            )
-                .into_response()
-        }
-    };
-
-    let mut req = client.post(&url).json(&chat_body);
-    for (k, v) in &hdrs {
-        req = req.header(k.as_str(), v.as_str());
-    }
-
-    let resp = match req.send().await {
+    // 多账号故障转移：拿到 200 响应后才开始流式转发
+    let resp = match dispatch(&state, &chat_body, 300).await {
         Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": {"message": e.to_string(), "type": "api_error"}})),
-            )
-                .into_response()
-        }
+        Err(err_resp) => return err_resp,
     };
-
-    if resp.status() != reqwest::StatusCode::OK {
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-        let err_body: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({"error": {"message": text.chars().take(500).collect::<String>(), "type": "upstream_error", "code": status}}));
-        return (StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY), Json(err_body)).into_response();
-    }
 
     // Stream: convert Chat SSE → Anthropic SSE
     let model_clone = model.clone();

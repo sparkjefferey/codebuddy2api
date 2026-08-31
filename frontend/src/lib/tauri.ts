@@ -1,12 +1,23 @@
 // Tauri invoke wrappers — typed bridges to Rust commands
 import { invoke } from "@tauri-apps/api/core";
 
+export interface AccountInfo {
+  id: string;
+  uid: string;
+  nickname: string;
+  domain: string;
+  expires_at: number;
+  enabled: boolean;
+  consecutive_429?: number;
+  /** 冷却截止 epoch 毫秒；0 = 未冷却 */
+  cooldown_until?: number;
+  last_error?: string | null;
+  last_used_ms?: number | null;
+}
+
 export interface CredentialStatus {
   configured: boolean;
-  uid?: string;
-  nickname?: string;
-  domain?: string;
-  expires_at?: number;
+  accounts: AccountInfo[];
 }
 
 export async function getConfig(): Promise<Record<string, unknown>> {
@@ -17,12 +28,17 @@ export async function getCredentialStatus(): Promise<CredentialStatus> {
   return invoke("get_credential_status");
 }
 
+/** 导入账号：uid 相同则更新凭据，否则新增。返回 "added" | "updated" */
 export async function importCredential(jsonStr: string): Promise<string> {
   return invoke("import_credential", { jsonStr });
 }
 
-export async function clearCredential(): Promise<string> {
-  return invoke("clear_credential");
+export async function removeAccount(id: string): Promise<string> {
+  return invoke("remove_account", { id });
+}
+
+export async function setAccountEnabled(id: string, enabled: boolean): Promise<string> {
+  return invoke("set_account_enabled", { id, enabled });
 }
 
 export async function getApiKey(): Promise<string> {

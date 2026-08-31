@@ -7,6 +7,7 @@ mod ccswitch;
 mod config;
 mod credential;
 mod desensitize;
+mod pool;
 mod server;
 mod tray;
 
@@ -27,37 +28,58 @@ fn get_config(state: tauri::State<'_, AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
-async fn get_credential_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    match state.credential.get().await {
-        Some(c) => Ok(serde_json::json!({
-            "configured": true,
-            "uid": c.uid,
-            "nickname": c.nickname,
-            "domain": c.domain,
-            "expires_at": c.expires_at,
-        })),
-        None => Ok(serde_json::json!({"configured": false})),
-    }
+async fn get_credential_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let cfg = state.config.read().await;
+    let snap = state.pool.snapshot();
+    let accounts: Vec<serde_json::Value> = cfg
+        .accounts
+        .iter()
+        .map(|a| server::account_json(a, snap.get(&a.id)))
+        .collect();
+    Ok(serde_json::json!({
+        "configured": !cfg.accounts.is_empty(),
+        "accounts": accounts,
+    }))
 }
 
+/// 导入账号：uid 相同则更新该账号凭据，否则新增
 #[tauri::command]
 async fn import_credential(
     state: tauri::State<'_, AppState>,
     json_str: String,
 ) -> Result<String, String> {
     let cred = credential::validate_import(&json_str)?;
-    state.credential.set(cred.clone()).await;
     let mut cfg = state.config.write().await;
-    cfg.credential = Some(cred);
+    let action = cfg.upsert_account(cred);
+    cfg.save().map_err(|e| e.to_string())?;
+    Ok(action.into())
+}
+
+#[tauri::command]
+async fn remove_account(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<String, String> {
+    let mut cfg = state.config.write().await;
+    if !cfg.remove_account(&id) {
+        return Err("账号不存在".into());
+    }
     cfg.save().map_err(|e| e.to_string())?;
     Ok("ok".into())
 }
 
 #[tauri::command]
-async fn clear_credential(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state.credential.clear().await;
+async fn set_account_enabled(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<String, String> {
     let mut cfg = state.config.write().await;
-    cfg.credential = None;
+    if !cfg.set_account_enabled(&id, enabled) {
+        return Err("账号不存在".into());
+    }
     cfg.save().map_err(|e| e.to_string())?;
     Ok("ok".into())
 }
@@ -95,7 +117,7 @@ fn open_ccswitch_link(url: String) -> bool {
 
 #[tauri::command]
 fn get_version() -> String {
-    "1.0.0".into()
+    "1.1.0".into()
 }
 
 // ---------------------------------------------------------------------------
@@ -128,21 +150,27 @@ pub fn run() {
                     eprintln!("[gateway] server error: {e}");
                 }
             });
-            // Spawn catalog sync
+            // Spawn catalog sync — 取第一个启用账号拉取模型目录
             let catalog_state = app.state::<AppState>().inner().clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                if let Some(hdrs) = catalog_state.credential.build_headers().await {
-                    catalog_state.catalog.sync(&hdrs).await;
-                }
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
-                interval.tick().await;
                 loop {
-                    interval.tick().await;
-                    if let Some(hdrs) = catalog_state.credential.build_headers().await {
-                        catalog_state.catalog.sync(&hdrs).await;
+                    let first_id = {
+                        let cfg = catalog_state.config.read().await;
+                        cfg.accounts
+                            .iter()
+                            .find(|a| a.enabled)
+                            .map(|a| a.id.clone())
+                    };
+                    if let Some(id) = first_id {
+                        if let Ok(cred) = server::fresh_credential(&catalog_state, &id).await {
+                            catalog_state
+                                .catalog
+                                .sync(&credential::build_headers(&cred))
+                                .await;
+                        }
                     }
+                    tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
                 }
             });
             Ok(())
@@ -158,7 +186,8 @@ pub fn run() {
             get_config,
             get_credential_status,
             import_credential,
-            clear_credential,
+            remove_account,
+            set_account_enabled,
             get_api_key,
             toggle_desensitize,
             build_ccswitch_link,

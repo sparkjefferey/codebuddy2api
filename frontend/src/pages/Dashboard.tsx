@@ -18,16 +18,18 @@ export default function Dashboard() {
       const r = await fetch(GATEWAY + "/credits", {
         headers: { "X-Api-Key": key },
       }).then((r) => r.json());
-      const acct = r?.account;
-      if (acct?.credits_remaining !== undefined) {
-        setCredits(String(acct.credits_remaining));
-      } else if (acct?.error) {
+      if (r?.credits_remaining !== undefined) {
+        setCredits(String(r.credits_remaining));
+      } else if (r?.error) {
         setCredits("不可用");
       }
     } catch { setCredits("不可用"); }
   }
 
   useEffect(() => { refresh(); }, []);
+
+  const accounts = cred?.accounts ?? [];
+  const enabledCount = accounts.filter((a) => a.enabled).length;
 
   const cardStyle = {
     background: "var(--bg-panel)",
@@ -52,15 +54,29 @@ export default function Dashboard() {
         <div style={cardStyle}>
           <div style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 6 }}>积分余额</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{credits}</div>
-          <div style={{ color: "var(--text-mid)", fontSize: 12.5, marginTop: 4 }}>CN · 单账号</div>
+          <div style={{ color: "var(--text-mid)", fontSize: 12.5, marginTop: 4 }}>
+            {accounts.length > 0
+              ? `${enabledCount}/${accounts.length} 账号合计 · 轮询`
+              : "CN"}
+          </div>
         </div>
         <div style={cardStyle}>
-          <div style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 6 }}>账号</div>
-          {cred?.configured ? (
+          <div style={{ color: "var(--text-dim)", fontSize: 12, marginBottom: 6 }}>账号池</div>
+          {accounts.length > 0 ? (
             <>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>{cred.nickname || "已登录"}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>
+                {enabledCount}
+                <span style={{ fontSize: 14, fontWeight: 400, color: "var(--text-mid)" }}>
+                  {" "}/ {accounts.length}
+                </span>
+              </div>
               <div style={{ color: "var(--text-mid)", fontSize: 12.5, marginTop: 4 }}>
-                uid: {cred.uid?.slice(0, 12) || "—"}
+                {enabledCount > 0
+                  ? accounts
+                      .filter((a) => a.enabled)
+                      .map((a) => a.nickname || a.uid?.slice(0, 8) || "账号")
+                      .join(" · ")
+                  : "全部已停用"}
               </div>
             </>
           ) : (
