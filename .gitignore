@@ -1,41 +1,33 @@
-# 参考 / 原始文件（原版 sliverkiss 与本项目旧快照），不发布
-references/
+# Dependencies & build
+node_modules/
+dist/
+target/
+src-tauri/target/
+src-tauri/gen/schemas/
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-.venv/
-env/
-ENV/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
+# Generated
+*.dmg
+*.msi
+*.exe
+*.AppImage
 
-# 本地运行产物 / 日志 / IDE
-*.log
-.DS_Store
-Thumbs.db
-.idea/
-
-# 个人 / 敏感信息（绝不提交）
+# Local secrets / runtime data
+config.json
 *.token
 *.key
+*.info
 secrets.*
-config.json
 
-# 测试（暂不公开）
-test_*.py
+# Logs
+*.log
 
-# 打包产物（本地 build-release-local.sh 生成，CI 在干净 runner 上重建）
-build/
-dist/
-VERSION
-*.dmg
-*.p8
-*.keychain-db
-gateway-win-x64.zip
-gateway-linux-x64.tar.gz
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python (legacy)
+__pycache__/
+*.pyc
+.venv/

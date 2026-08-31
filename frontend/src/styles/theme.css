@@ -1,0 +1,110 @@
+/* BuddyAIGateway design system
+   Direction: "instrument panel" — deep night-blue base, electric-blue accents.
+   Signature: pulsing gateway heartbeat dot in the topbar. */
+
+:root {
+  color-scheme: dark light;
+
+  /* Dark-first palette */
+  --bg-base: #0b1020;        /* night blue ground */
+  --bg-panel: #111830;       /* panel surface */
+  --bg-raised: #172038;      /* raised cards */
+  --line: #232e4d;           /* hairlines */
+  --text-hi: #e8edf7;        /* primary text */
+  --text-mid: #9aa7c7;       /* secondary */
+  --text-dim: #5d6a8a;       /* tertiary */
+
+  --accent: #4d8dff;         /* electric blue */
+  --accent-dim: #2b5cb8;
+  --ok: #38d39f;             /* heartbeat green */
+  --warn: #f5b342;
+  --err: #f56a6a;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --font-ui: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-base: #f2f4f8;
+    --bg-panel: #ffffff;
+    --bg-raised: #ffffff;
+    --line: #dde3ee;
+    --text-hi: #17203a;
+    --text-mid: #4d5a7a;
+    --text-dim: #7c88a6;
+    --accent: #2f6feb;
+    --accent-dim: #5b8ef5;
+  }
+}
+
+/* Manual dark theme wins over both */
+:root[data-theme="dark"] {
+  --bg-base: #0b1020;
+  --bg-panel: #111830;
+  --bg-raised: #172038;
+  --line: #232e4d;
+  --text-hi: #e8edf7;
+  --text-mid: #9aa7c7;
+  --text-dim: #5d6a8d;
+  --accent: #4d8dff;
+  --accent-dim: #2b5cb8;
+  --ok: #38d39f;
+  --warn: #f5b342;
+  --err: #f56a6a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--bg-base);
+  color: var(--text-hi);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, textarea, select {
+  font-family: inherit;
+}
+
+code, pre {
+  font-family: var(--font-mono);
+}
+
+/* Focus visibility */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Signature: pulsing heartbeat dot */
+@keyframes heartbeat {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.heartbeat {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: heartbeat 2.2s ease-out infinite;
+}
+.heartbeat.err {
+  background: var(--err);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heartbeat { animation: none; }
+}
