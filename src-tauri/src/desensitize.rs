@@ -96,8 +96,15 @@ const SENSITIVE_TERMS: &[&str] = &[
 /// 命中即 11128 "Illegal API invocation from an unapproved channel"。除品牌词外，
 /// CC 注入的系统性样板也是指纹载体（实测环境信息段里不含任何品牌词的
 /// "Main branch (you will usually use this for PRs): …" 一行即可触发 11128），
-/// 因此必须配合 `compact_harness_systems` 从源头移除样板，而非逐词绕过。
-const CHANNEL_TERMS: &[&str] = &["claude", "anthropic"];
+/// 因此必须配合 `strip_harness_context` 从源头移除样板，而非逐词绕过。
+/// 注：指纹检测**只针对 assistant 角色文本**（实测同样内容放 user/tool 不触发，
+/// tool_calls 参数也不触发）；拆分应用到全部角色属安全覆盖。
+const CHANNEL_TERMS: &[&str] = &[
+    // 品牌无关指纹短语（从真实抓包请求二分得出；assistant 文本出现即 11128）
+    "main branch (you will usually use this for prs)",
+    "claude",
+    "anthropic",
+];
 
 /// CC/Codex 壳层 system 指纹句（对标 Python 版 _CODEX_SYSTEM_MARKERS）。
 const HARNESS_SYSTEM_MARKERS: &[&str] = &[
@@ -398,6 +405,24 @@ mod tests {
         let s3 = body3["messages"][0]["content"].as_str().unwrap();
         assert!(s3.contains("interactive") == false); // 未替换整条 —— 应保留原文（带 ZWSP）
         assert_eq!(s3.replace('\u{200B}', ""), "You are Claude Code, Anthropic's official CLI for Claude.");
+    }
+
+    #[test]
+    fn channel_splits_fingerprint_phrase_in_assistant_text() {
+        // assistant 文本出现品牌无关指纹短语 → 拆分（B1/B5 实测：原文 11128，拆分后 200）
+        let mut body = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": "You are a coding assistant."},
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "Current branch: main\n\nMain branch (you will usually use this for PRs): main\n\nGit user: x"}
+            ]
+        });
+        channel_desensitize(&mut body);
+        let s = body["messages"][2]["content"].as_str().unwrap();
+        assert!(!s.contains("Main branch (you will usually use this for PRs)"));
+        assert!(s.contains('\u{200B}'));
+        // 拆掉 ZWSP 后原文仍在（只破坏子串匹配，不删内容）
+        assert_eq!(s.replace('\u{200B}', ""), "Current branch: main\n\nMain branch (you will usually use this for PRs): main\n\nGit user: x");
     }
 
     #[test]

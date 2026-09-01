@@ -645,7 +645,7 @@ async fn messages_handler(
     let mut chat_body = anthropic_to_chat(&body);
 
     // 调试用：BUDDY_DUMP_BODY=1 时把出站体写入配置目录（默认关闭，不留 Prompt）。
-    // 记录在净化前——渠道防护后的内容不代表客户端发来的原始内容。
+    // 记录净化前（原始）与净化后（实际出站）两份，便于对比渠道层是否生效。
     if std::env::var("BUDDY_DUMP_BODY").as_deref() == Ok("1") {
         let dump = serde_json::to_string(&chat_body).unwrap_or_default();
         let _ = std::fs::write(dump_path(), dump);
@@ -656,6 +656,11 @@ async fn messages_handler(
     // prompt）。渠道指纹中和 + system 兜底常开，与可选的隐私脱敏互不影响。
     ensure_system_first(&mut chat_body);
     desensitize::channel_desensitize(&mut chat_body);
+
+    if std::env::var("BUDDY_DUMP_BODY").as_deref() == Ok("1") {
+        let dump = serde_json::to_string(&chat_body).unwrap_or_default();
+        let _ = std::fs::write(dump_path().with_file_name("last_outgoing_sanitized.json"), dump);
+    }
 
     // Optional desensitize
     let do_desensitize = state.config.read().await.desensitize;
