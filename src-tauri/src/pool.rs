@@ -72,7 +72,7 @@ impl AccountPool {
             ids.iter()
                 .filter(|id| {
                     map.get(*id)
-                        .map_or(true, |s| s.cooldown_until_ms <= now)
+                        .is_none_or(|s| s.cooldown_until_ms <= now)
                 })
                 .cloned()
                 .collect()

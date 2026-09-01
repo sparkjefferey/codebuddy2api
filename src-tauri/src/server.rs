@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
 
-use crate::anthropic::{anthropic_to_chat, AnthropicStreamConverter};
+use crate::anthropic::{anthropic_to_chat, ensure_system_first, AnthropicStreamConverter};
 use crate::billing;
 use crate::catalog::ModelCatalog;
 use crate::config::{AccountEntry, AppConfig, CredentialData};
@@ -488,13 +488,15 @@ async fn agents_test_handler(
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("hy3");
 
     // Quick chat via upstream — 走多账号调度
-    let chat_body = serde_json::json!({
+    let mut chat_body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 32,
         "stream": true,
         "stream_options": {"include_usage": true}
     });
+    ensure_system_first(&mut chat_body);
+    desensitize::channel_desensitize(&mut chat_body);
 
     let resp = match dispatch(&state, &chat_body, 30).await {
         Ok(r) => r,
@@ -634,6 +636,12 @@ async fn messages_handler(
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("hy3").to_string();
 
     let mut chat_body = anthropic_to_chat(&body);
+
+    // 上游 2026-09 起对请求内容做官方客户端指纹扫描（11128 Illegal API invocation），
+    // 且 workbuddy.ai 后端要求首条消息必须是 system（11128 first message is not system
+    // prompt）。渠道指纹中和 + system 兜底常开，与可选的隐私脱敏互不影响。
+    ensure_system_first(&mut chat_body);
+    desensitize::channel_desensitize(&mut chat_body);
 
     // Optional desensitize
     let do_desensitize = state.config.read().await.desensitize;

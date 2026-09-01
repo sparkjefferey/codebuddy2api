@@ -241,6 +241,27 @@ pub fn anthropic_to_chat(body: &Value) -> Value {
     chat
 }
 
+/// workbuddy.ai 后端要求 messages 首条必须是 system（否则 11128
+/// "first message is not system prompt"）；CN 后端带 system 开头也实测正常。
+/// 客户端未提供 system 时补一条中性兜底。
+pub fn ensure_system_first(chat: &mut Value) {
+    let first_is_system = chat
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|m| m.get("role"))
+        .and_then(|r| r.as_str())
+        == Some("system");
+    if !first_is_system {
+        if let Some(a) = chat.get_mut("messages").and_then(|v| v.as_array_mut()) {
+            a.insert(
+                0,
+                json!({"role": "system", "content": "You are a helpful assistant."}),
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AnthropicStreamConverter — Chat SSE → Anthropic SSE
 // ---------------------------------------------------------------------------
@@ -505,5 +526,19 @@ mod tests {
         let chat = anthropic_to_chat(&body);
         let tools = chat["tools"].as_array().unwrap();
         assert_eq!(tools[0]["function"]["name"], "bash");
+    }
+
+    #[test]
+    fn ensure_system_first_prepends_when_missing() {
+        let mut chat = json!({"messages": [{"role": "user", "content": "hi"}]});
+        ensure_system_first(&mut chat);
+        assert_eq!(chat["messages"][0]["role"], "system");
+        assert_eq!(chat["messages"][1]["role"], "user");
+
+        let mut chat2 = json!({"messages": [
+            {"role": "system", "content": "s"}, {"role": "user", "content": "hi"}
+        ]});
+        ensure_system_first(&mut chat2);
+        assert_eq!(chat2["messages"][0]["content"], "s");
     }
 }
