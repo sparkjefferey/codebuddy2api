@@ -107,15 +107,17 @@ const HARNESS_SYSTEM_MARKERS: &[&str] = &[
     "x-anthropic-billing-header",
 ];
 
-/// 壳层 system 的中性摘要替换文本（与 Python 版 compact_harness 同款）。
-const HARNESS_SYSTEM_SUMMARY: &str = "You are a coding assistant. Be precise, helpful, concise, and safe. \
-Use available tools when needed, follow repository instructions, and keep the user informed.";
+/// 壳层 system 中的机器上下文块起点：CC 在 system 末尾注入的 gitStatus
+/// 数据快照（Current branch / Main branch… / Git user / Recent commits）。
+/// 上游指纹实测载体 —— 不含任何品牌词的 "Main branch (you will usually use
+/// this for PRs): …" 一行即可触发 11128。该信息模型可自行运行 git 获取，
+/// 剪除不影响行为指令（实测：指令主体单独回放 200，剪块后全量回放 200）。
+const HARNESS_GIT_STATUS_PREFIX: &str = "gitStatus:";
 
-/// 压缩壳层 system：Claude Code / Codex 注入的全套系统样板（IMPORTANT 段、
-/// tone、环境信息、gitStatus…）是上游指纹风控的主要载体，且对模型行为非必需。
-/// Python 版 compact_harness 的做法：整体替换为一句中性摘要，让样板从不出站。
-/// 必须在 ZWSP 拆分**之前**运行（指纹要匹配未拆分的原文）。
-pub fn compact_harness_systems(body: &mut serde_json::Value) {
+/// 剪除壳层 system 中的机器上下文块：命中 CC/Codex 指纹句的 system，
+/// 从 gitStatus 行起到消息末尾剪除，其余指令完整保留（不做整体压缩）。
+/// 非壳层 system 完全不动。必须在 ZWSP 拆分**之前**运行指纹匹配。
+pub fn strip_harness_context(body: &mut serde_json::Value) {
     let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) else {
         return;
     };
@@ -127,8 +129,22 @@ pub fn compact_harness_systems(body: &mut serde_json::Value) {
         let Some(text) = content.as_str().map(|s| s.to_string()) else {
             continue;
         };
-        if HARNESS_SYSTEM_MARKERS.iter().any(|m| text.contains(m)) {
-            *content = serde_json::Value::String(HARNESS_SYSTEM_SUMMARY.into());
+        if !HARNESS_SYSTEM_MARKERS.iter().any(|m| text.contains(m)) {
+            continue;
+        }
+        // gitStatus 块从独立成行的 gitStatus: 起（到消息末尾）
+        let cut = if text
+            .find(HARNESS_GIT_STATUS_PREFIX)
+            .is_some_and(|pos| text[..pos].ends_with('\n'))
+        {
+            text.find(HARNESS_GIT_STATUS_PREFIX)
+        } else if text.starts_with(HARNESS_GIT_STATUS_PREFIX) {
+            Some(0)
+        } else {
+            None
+        };
+        if let Some(pos) = cut {
+            *content = serde_json::Value::String(text[..pos].trim_end().to_string());
         }
     }
 }
@@ -188,11 +204,12 @@ pub fn desensitize_text(text: &str) -> String {
 }
 
 /// 渠道指纹中和（常开层）：
-/// 1. 压缩 CC/Codex 壳层 system 样板（主要指纹载体，见 compact_harness_systems）；
+/// 1. 剪除 CC/Codex 壳层 system 里的机器上下文块（主要指纹载体，见
+///    strip_harness_context），行为指令保留；
 /// 2. 拆分全部角色文本与工具描述中的品牌词，破坏上游子串匹配。
 ///    不改工具函数名/参数，不影响调用匹配。
 pub fn channel_desensitize(body: &mut serde_json::Value) {
-    compact_harness_systems(body);
+    strip_harness_context(body);
     if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
         for msg in messages.iter_mut() {
             if let Some(content) = msg.get_mut("content") {
@@ -340,8 +357,8 @@ mod tests {
     }
 
     #[test]
-    fn harness_system_replaced_by_summary() {
-        let cc_system = "x-anthropic-billing-header: cc_version=2.1.251\nYou are Claude Code, Anthropic's official CLI for Claude.\n\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with defensive security.\nGit status: clean.\nMain branch (you will usually use this for PRs): main";
+    fn harness_gitstatus_block_stripped_instructions_kept() {
+        let cc_system = "You are Claude Code, Anthropic's official CLI for Claude.\n\nIMPORTANT: Assist with defensive security.\n\n# Tone\nBe concise.\n\ngitStatus: This is the git status snapshot.\n\nCurrent branch: main\n\nMain branch (you will usually use this for PRs): main\n\nGit user: someone";
         let mut body = serde_json::json!({
             "messages": [
                 {"role": "system", "content": cc_system},
@@ -350,22 +367,37 @@ mod tests {
         });
         channel_desensitize(&mut body);
         let msgs = body["messages"].as_array().unwrap();
-        // 整个样板被压缩为中性摘要，不出站
-        assert_eq!(msgs[0]["content"], HARNESS_SYSTEM_SUMMARY);
-        assert!(!msgs[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Main branch"));
+        let s = msgs[0]["content"].as_str().unwrap();
+        // gitStatus 块剪除，行为指令完整保留
+        assert!(!s.contains("gitStatus"));
+        assert!(!s.contains("Main branch"));
+        assert!(!s.contains("Current branch"));
+        assert!(s.contains("IMPORTANT: Assist with defensive security."));
+        assert!(s.contains("# Tone"));
+        assert!(s.contains("Be concise."));
 
-        // 非壳层 system 不受影响
+        // 非壳层 system 即使含类似行也不动
         let mut body2 = serde_json::json!({
             "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful assistant.\nCurrent branch: dev"},
                 {"role": "user", "content": "hi"}
             ]
         });
         channel_desensitize(&mut body2);
-        assert_eq!(body2["messages"][0]["content"], "You are a helpful assistant.");
+        let s2 = body2["messages"][0]["content"].as_str().unwrap();
+        assert!(s2.contains("Current branch: dev"));
+
+        // 壳层 system 无 gitStatus 块时提示词不变（品牌词由 ZWSP 层处理）
+        let mut body3 = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": "You are Claude Code, Anthropic's official CLI for Claude."},
+                {"role": "user", "content": "hi"}
+            ]
+        });
+        channel_desensitize(&mut body3);
+        let s3 = body3["messages"][0]["content"].as_str().unwrap();
+        assert!(s3.contains("interactive") == false); // 未替换整条 —— 应保留原文（带 ZWSP）
+        assert_eq!(s3.replace('\u{200B}', ""), "You are Claude Code, Anthropic's official CLI for Claude.");
     }
 
     #[test]

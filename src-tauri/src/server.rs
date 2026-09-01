@@ -644,6 +644,13 @@ async fn messages_handler(
 
     let mut chat_body = anthropic_to_chat(&body);
 
+    // 调试用：BUDDY_DUMP_BODY=1 时把出站体写入配置目录（默认关闭，不留 Prompt）。
+    // 记录在净化前——渠道防护后的内容不代表客户端发来的原始内容。
+    if std::env::var("BUDDY_DUMP_BODY").as_deref() == Ok("1") {
+        let dump = serde_json::to_string(&chat_body).unwrap_or_default();
+        let _ = std::fs::write(dump_path(), dump);
+    }
+
     // 上游 2026-09 起对请求内容做官方客户端指纹扫描（11128 Illegal API invocation），
     // 且 workbuddy.ai 后端要求首条消息必须是 system（11128 first message is not system
     // prompt）。渠道指纹中和 + system 兜底常开，与可选的隐私脱敏互不影响。
@@ -660,12 +667,6 @@ async fn messages_handler(
     chat_body["stream"] = serde_json::json!(true);
     if chat_body.get("stream_options").is_none() {
         chat_body["stream_options"] = serde_json::json!({"include_usage": true});
-    }
-
-    // 调试用：BUDDY_DUMP_BODY=1 时把最终出站体写入配置目录（默认关闭，不留 Prompt）
-    if std::env::var("BUDDY_DUMP_BODY").as_deref() == Ok("1") {
-        let dump = serde_json::to_string(&chat_body).unwrap_or_default();
-        let _ = std::fs::write(dump_path(), dump);
     }
 
     // 多账号故障转移：拿到 200 响应后才开始流式转发
