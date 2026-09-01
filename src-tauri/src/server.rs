@@ -624,6 +624,13 @@ async fn count_tokens_handler(
 // POST /v1/messages — core streaming handler
 // ---------------------------------------------------------------------------
 
+fn dump_path() -> std::path::PathBuf {
+    let dir = std::env::var("APPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    dir.join("buddyaigateway").join("last_outgoing.json")
+}
+
 async fn messages_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -653,6 +660,12 @@ async fn messages_handler(
     chat_body["stream"] = serde_json::json!(true);
     if chat_body.get("stream_options").is_none() {
         chat_body["stream_options"] = serde_json::json!({"include_usage": true});
+    }
+
+    // 调试用：BUDDY_DUMP_BODY=1 时把最终出站体写入配置目录（默认关闭，不留 Prompt）
+    if std::env::var("BUDDY_DUMP_BODY").as_deref() == Ok("1") {
+        let dump = serde_json::to_string(&chat_body).unwrap_or_default();
+        let _ = std::fs::write(dump_path(), dump);
     }
 
     // 多账号故障转移：拿到 200 响应后才开始流式转发

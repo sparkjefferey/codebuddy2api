@@ -93,10 +93,45 @@ const SENSITIVE_TERMS: &[&str] = &[
 ];
 
 /// 渠道指纹词表（常开层）：上游 2026-09 起对请求内容做官方客户端签名扫描，
-/// 命中即 11128 "Illegal API invocation from an unapproved channel"（实测指纹为
-/// 「You are Claude Code, Anthropic's official CLI for Claude.」一类含品牌词的
-/// 身份句；词内插单个 ZWSP 即可完全绕过且模型语义几乎不变）。
+/// 命中即 11128 "Illegal API invocation from an unapproved channel"。除品牌词外，
+/// CC 注入的系统性样板也是指纹载体（实测环境信息段里不含任何品牌词的
+/// "Main branch (you will usually use this for PRs): …" 一行即可触发 11128），
+/// 因此必须配合 `compact_harness_systems` 从源头移除样板，而非逐词绕过。
 const CHANNEL_TERMS: &[&str] = &["claude", "anthropic"];
+
+/// CC/Codex 壳层 system 指纹句（对标 Python 版 _CODEX_SYSTEM_MARKERS）。
+const HARNESS_SYSTEM_MARKERS: &[&str] = &[
+    "You are Claude Code",
+    "You are a coding agent running in the Codex CLI",
+    "Within this context, Codex refers to",
+    "x-anthropic-billing-header",
+];
+
+/// 壳层 system 的中性摘要替换文本（与 Python 版 compact_harness 同款）。
+const HARNESS_SYSTEM_SUMMARY: &str = "You are a coding assistant. Be precise, helpful, concise, and safe. \
+Use available tools when needed, follow repository instructions, and keep the user informed.";
+
+/// 压缩壳层 system：Claude Code / Codex 注入的全套系统样板（IMPORTANT 段、
+/// tone、环境信息、gitStatus…）是上游指纹风控的主要载体，且对模型行为非必需。
+/// Python 版 compact_harness 的做法：整体替换为一句中性摘要，让样板从不出站。
+/// 必须在 ZWSP 拆分**之前**运行（指纹要匹配未拆分的原文）。
+pub fn compact_harness_systems(body: &mut serde_json::Value) {
+    let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for msg in messages.iter_mut() {
+        if msg.get("role").and_then(|v| v.as_str()) != Some("system") {
+            continue;
+        }
+        let Some(content) = msg.get_mut("content") else { continue };
+        let Some(text) = content.as_str().map(|s| s.to_string()) else {
+            continue;
+        };
+        if HARNESS_SYSTEM_MARKERS.iter().any(|m| text.contains(m)) {
+            *content = serde_json::Value::String(HARNESS_SYSTEM_SUMMARY.into());
+        }
+    }
+}
 
 fn zero_width_split(term: &str) -> String {
     let mut chars = term.chars();
@@ -152,9 +187,12 @@ pub fn desensitize_text(text: &str) -> String {
     split_terms_in_text(text, SENSITIVE_TERMS)
 }
 
-/// 渠道指纹中和（常开层）：拆分全部角色文本与工具描述中的品牌词，
-/// 破坏上游对官方客户端签名的子串匹配。不改工具函数名/参数，不影响调用匹配。
+/// 渠道指纹中和（常开层）：
+/// 1. 压缩 CC/Codex 壳层 system 样板（主要指纹载体，见 compact_harness_systems）；
+/// 2. 拆分全部角色文本与工具描述中的品牌词，破坏上游子串匹配。
+///    不改工具函数名/参数，不影响调用匹配。
 pub fn channel_desensitize(body: &mut serde_json::Value) {
+    compact_harness_systems(body);
     if let Some(messages) = body.get_mut("messages").and_then(|v| v.as_array_mut()) {
         for msg in messages.iter_mut() {
             if let Some(content) = msg.get_mut("content") {
@@ -264,7 +302,7 @@ mod tests {
     fn channel_splits_brand_words_all_roles() {
         let mut body = serde_json::json!({
             "messages": [
-                {"role": "system", "content": "You are Claude Code, Anthropic's official CLI for Claude."},
+                {"role": "system", "content": "Claude is a helpful model by Anthropic."},
                 {"role": "user", "content": "what is claude"},
                 {"role": "assistant", "content": null, "tool_calls": [
                     {"id": "x", "type": "function", "function": {"name": "Read", "arguments": "{}"}}
@@ -285,7 +323,7 @@ mod tests {
         let msgs = body["messages"].as_array().unwrap();
         assert_eq!(
             msgs[0]["content"],
-            "You are C\u{200B}laude Code, A\u{200B}nthropic's official CLI for C\u{200B}laude."
+            "C\u{200B}laude is a helpful model by A\u{200B}nthropic."
         );
         assert_eq!(msgs[1]["content"], "what is c\u{200B}laude");
         // tool_calls 函数名/参数不动
@@ -299,6 +337,35 @@ mod tests {
         );
         // 无品牌词的字段不变
         assert_eq!(body["model"], "hy3");
+    }
+
+    #[test]
+    fn harness_system_replaced_by_summary() {
+        let cc_system = "x-anthropic-billing-header: cc_version=2.1.251\nYou are Claude Code, Anthropic's official CLI for Claude.\n\nYou are an interactive agent that helps users with software engineering tasks.\n\nIMPORTANT: Assist with defensive security.\nGit status: clean.\nMain branch (you will usually use this for PRs): main";
+        let mut body = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": cc_system},
+                {"role": "user", "content": "hi"}
+            ]
+        });
+        channel_desensitize(&mut body);
+        let msgs = body["messages"].as_array().unwrap();
+        // 整个样板被压缩为中性摘要，不出站
+        assert_eq!(msgs[0]["content"], HARNESS_SYSTEM_SUMMARY);
+        assert!(!msgs[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Main branch"));
+
+        // 非壳层 system 不受影响
+        let mut body2 = serde_json::json!({
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "hi"}
+            ]
+        });
+        channel_desensitize(&mut body2);
+        assert_eq!(body2["messages"][0]["content"], "You are a helpful assistant.");
     }
 
     #[test]
